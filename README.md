@@ -40,9 +40,10 @@ human-in-the-loop gates when you want them.
 
 ## Status
 
-Early development (milestone M1 complete: pipeline skeleton, config, run
-store, agent session wiring). The six phases land milestone by milestone —
-see [ROADMAP.md](ROADMAP.md).
+All six pipeline phases are implemented and unit-tested (67 tests); the
+harness is ready for a live end-to-end run once provider API keys are
+configured. See [ROADMAP.md](ROADMAP.md) for milestone detail and the
+explicit non-goals.
 
 ## Quickstart
 

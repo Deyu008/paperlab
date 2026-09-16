@@ -128,10 +128,53 @@ async function main(): Promise<void> {
     if ((e as Error).name === "PhaseFailedError") {
       log(`${(e as Error).message}`);
       log(`state saved — re-run with --resume ${store.root}`);
-      process.exit(2);
+      process.exitCode = 2;
+    } else {
+      throw e;
     }
-    throw e;
+  } finally {
+    await writeRunReport(store);
   }
+}
+
+/** Final run report: phase statuses + token usage. Written even on failure. */
+async function writeRunReport(store: RunStore): Promise<void> {
+  const { readFileSync, existsSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const usagePath = join(store.root, "tokens.jsonl");
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let calls = 0;
+  if (existsSync(usagePath)) {
+    for (const line of readFileSync(usagePath, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      const rec = JSON.parse(line) as { inputTokens: number; outputTokens: number };
+      inputTokens += rec.inputTokens;
+      outputTokens += rec.outputTokens;
+      calls++;
+    }
+  }
+  const phases = Object.entries(store.state.phases)
+    .map(([k, v]) => `- ${k}: ${v.status} (${v.attempts} attempt${v.attempts === 1 ? "" : "s"})`)
+    .join("\n");
+  writeFileSync(
+    join(store.root, "report.md"),
+    [
+      `# Run report`,
+      ``,
+      `Topic: ${store.topic}`,
+      `Created: ${store.state.createdAt}`,
+      ``,
+      `## Phases`,
+      phases || "(none ran)",
+      ``,
+      `## Usage`,
+      `- LLM turns: ${calls}`,
+      `- Input tokens: ${inputTokens.toLocaleString("en-US")}`,
+      `- Output tokens: ${outputTokens.toLocaleString("en-US")}`,
+      ``,
+    ].join("\n"),
+  );
 }
 
 main().catch((e) => {
