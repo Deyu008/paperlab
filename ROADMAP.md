@@ -57,7 +57,8 @@
 
 ## Later (explicitly out of MVP)
 
-- Live end-to-end demo run (needs provider API keys; wiring is smoke-tested)
+- Live end-to-end demo run (needs provider API keys; pipeline is verified by a
+  faux-LLM integration test — real sessions, tools, sandbox, and store)
 - arXiv API adapter (S2 + OpenAlex already cover discovery)
 - Elo tournament idea selection (co-scientist style)
 - Multi-lab parallelism

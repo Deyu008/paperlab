@@ -13,10 +13,21 @@ import {
   getAgentDir,
   type CreateAgentSessionResult,
   type ToolDefinition,
+  type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
 import { ROLES } from "../roles/index.ts";
 import type { RoleKey } from "../config.ts";
+
+/**
+ * Runtime override (embedding/tests): when set, every session uses this
+ * ModelRuntime — e.g. one with a faux provider registered.
+ */
+let runtimeOverride: ModelRuntime | null = null;
+
+export function setAgentRuntimeOverride(runtime: ModelRuntime | null): void {
+  runtimeOverride = runtime;
+}
 
 export interface RoleSessionOptions {
   /** Role from the registry, or a raw system prompt for ad-hoc sessions. */
@@ -76,14 +87,22 @@ export async function createRoleSession(options: RoleSessionOptions): Promise<Ro
   });
   await loader.reload();
 
+  // Tool surface: custom tools are always enabled; built-ins are opt-in.
+  // (An empty `tools` allowlist would disable custom tools too — pi treats a
+  // provided list as exhaustive — so we use noTools:"builtin" instead.)
+  const toolOptions =
+    options.builtinTools && options.builtinTools.length > 0
+      ? { tools: [...options.builtinTools, ...(options.customTools ?? []).map((t) => t.name)] }
+      : { noTools: "builtin" as const };
+
   const result = await createAgentSession({
     cwd: options.cwd,
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(),
     model: options.model,
+    modelRuntime: runtimeOverride ?? undefined,
     customTools: options.customTools,
-    // Only explicitly allowlisted built-ins are enabled; dialogue roles get none.
-    tools: options.builtinTools ?? [],
+    ...toolOptions,
   });
 
   const transcript = options.transcript ?? null;

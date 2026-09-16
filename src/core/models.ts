@@ -6,6 +6,20 @@ import type { Model } from "@earendil-works/pi-ai";
 import type { ModelRef, RoleKey } from "../config.ts";
 import { modelRefForRole, type PaperlabConfig } from "../config.ts";
 
+/**
+ * Programmatic model injection (embedding/tests): models registered here are
+ * resolved before the built-in catalog, enabling faux or custom providers.
+ */
+const extraModels = new Map<string, Model<any>>();
+
+export function registerExtraModel(ref: ModelRef, model: Model<any>): void {
+  extraModels.set(`${ref.provider}/${ref.model}`, model);
+}
+
+export function clearExtraModels(): void {
+  extraModels.clear();
+}
+
 export class ModelResolutionError extends Error {
   constructor(message: string) {
     super(message);
@@ -15,6 +29,8 @@ export class ModelResolutionError extends Error {
 
 /** Resolve a ModelRef to a live Model, with a precise error when unknown. */
 export function resolveModel(ref: ModelRef): Model<any> {
+  const extra = extraModels.get(`${ref.provider}/${ref.model}`);
+  if (extra) return extra;
   const providers = getBuiltinProviders() as string[];
   if (!providers.includes(ref.provider)) {
     throw new ModelResolutionError(
