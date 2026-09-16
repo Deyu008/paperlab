@@ -83,3 +83,42 @@ export async function readTotalUsage(ctx: PhaseContext): Promise<{ inputTokens: 
   }
   return { inputTokens, outputTokens };
 }
+
+/**
+ * Open a role session the phase keeps across several prompts (dialogues).
+ * Call close() when done — it records usage and disposes.
+ */
+export async function openRoleSession(options: RunSessionOptions): Promise<{
+  session: RoleSession;
+  close: () => void;
+}> {
+  const { ctx, phase, role } = options;
+  const model = resolveRoleModel(ctx.config, role);
+  const session = await createRoleSession({
+    role: options.systemPrompt ? undefined : role,
+    systemPrompt: options.systemPrompt,
+    cwd: ctx.store.root,
+    model,
+    customTools: options.tools,
+    transcript: ctx.store.transcript(phase, role),
+  });
+  let closed = false;
+  return {
+    session,
+    close: () => {
+      if (closed) return;
+      closed = true;
+      const u = session.usage();
+      ctx.store.recordUsage({
+        ts: new Date().toISOString(),
+        phase,
+        role,
+        model: u.model,
+        inputTokens: u.inputTokens,
+        outputTokens: u.outputTokens,
+        costUsd: null,
+      });
+      session.session.dispose();
+    },
+  };
+}

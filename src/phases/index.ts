@@ -5,6 +5,7 @@
  */
 import { Pipeline, type Phase } from "../orchestrator.ts";
 import { literaturePhase } from "./1-literature.ts";
+import { planPhase } from "./2-plan.ts";
 
 function notImplemented(key: string, name: string): Phase {
   return {
@@ -32,7 +33,7 @@ const GATES: ReadonlySet<string> = new Set(["02-plan", "05-paper"]);
 export function buildPipeline(): Pipeline {
   const phases: Phase[] = [
     literaturePhase,
-    notImplemented("02-plan", "Research plan formulation"),
+    planPhase,
     notImplemented("03-experiment", "Experiment execution"),
     notImplemented("04-interpret", "Results interpretation"),
     notImplemented("05-paper", "Paper writing"),
