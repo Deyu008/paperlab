@@ -1,0 +1,54 @@
+# paperlab configuration
+# Copy to config.yaml (gitignored patterns like config.local.yaml stay out of git)
+# and adjust. Every key is optional — defaults are shown here.
+
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
+# `default` is used for every role that has no explicit override.
+# provider/model must exist in the pi-ai built-in catalog (`paperlab models`).
+# Examples for supported providers:
+#   deepseek:    deepseek-v4-flash / deepseek-v4-pro
+#   zai (GLM):   glm-4.7 / glm-4.7-flash
+#   moonshotai:  kimi-k2.5 / kimi-k2-thinking
+# API keys are read from the environment: DEEPSEEK_API_KEY, ZAI_API_KEY,
+# MOONSHOTAI_API_KEY, MINIMAX_API_KEY, ... (pi-ai env resolution).
+models:
+  default: { provider: deepseek, model: deepseek-v4-flash }
+  # mlengineer: { provider: deepseek, model: deepseek-v4-pro }
+  # writer:     { provider: zai,    model: glm-4.7 }
+  # reviewer:   { provider: moonshotai, model: kimi-k2.5 }
+
+# ---------------------------------------------------------------------------
+# Budgets (anti-runaway guards for each phase)
+# ---------------------------------------------------------------------------
+budgets:
+  literature:
+    target_papers: 12      # papers to collect before writing the review
+    max_searches: 15       # max search-tool invocations
+  plan:
+    dialogue_rounds: 3     # postdoc<->phd dialogue turns before extraction
+  experiment:
+    max_tool_calls: 60     # hard cap on sandbox tool invocations
+    step_timeout_sec: 600  # per run_python call
+  writeup:
+    reflections: 3         # compile-feedback reflection rounds
+  review:
+    revision_rounds: 2     # max revise->re-review iterations
+    accept_threshold: 6.0  # meta-review overall >= this stops revision
+
+# ---------------------------------------------------------------------------
+# Human-in-the-loop
+# ---------------------------------------------------------------------------
+# copilot pauses after key phases and asks for approval / notes on stdin.
+# Requires an interactive TTY; ignored otherwise.
+copilot: false
+
+# ---------------------------------------------------------------------------
+# Execution environments (auto-detected when set to `auto`)
+# ---------------------------------------------------------------------------
+sandbox: auto              # docker | local | auto
+latex: auto                # pdflatex | tectonic | docker | auto
+
+# Where run artifacts are written
+run_dir: runs
