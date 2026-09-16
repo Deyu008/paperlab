@@ -54,7 +54,8 @@ Docker recommended (sandbox).
 
 ```bash
 npm install
-export DEEPSEEK_API_KEY=sk-...   # or ZAI_API_KEY / MOONSHOTAI_API_KEY / ...
+cp .env.example .env             # then edit .env: DEEPSEEK_API_KEY=sk-...
+# (or export the env var directly — either works)
 npx paperlab run --topic "Do ensemble methods beat gradient boosting on small tabular datasets?"
 ```
 

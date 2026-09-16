@@ -5,6 +5,7 @@
  *   paperlab models [provider]
  */
 import { parseArgs } from "node:util";
+import { existsSync, readFileSync } from "node:fs";
 import { loadConfigFromDisk, type SandboxMode } from "./config.ts";
 import { listCatalog } from "./core/models.ts";
 import { RunStore } from "./core/run-store.ts";
@@ -27,8 +28,9 @@ Options:
   --copilot           enable human gates (overrides config)
   -h, --help          show this help
 
-Environment: provider API keys are read by pi-ai from the environment
-(DEEPSEEK_API_KEY, ZAI_API_KEY, MOONSHOTAI_API_KEY, ...).
+Environment: copy .env.example to .env and set your provider key
+(DEEPSEEK_API_KEY / ZAI_API_KEY / MOONSHOTAI_API_KEY / ...). The CLI loads
+.env automatically; exported env vars take precedence.
 `;
 
 function fail(message: string, code = 1): never {
@@ -40,7 +42,26 @@ function log(message: string): void {
   console.log(`[paperlab] ${message}`);
 }
 
+/**
+ * Minimal .env loader: KEY=VALUE lines, `#` comments, no quoting tricks.
+ * Existing environment variables always win over file values.
+ */
+function loadDotEnv(path = ".env"): boolean {
+  if (!existsSync(path)) return false;
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim();
+    if (key && process.env[key] === undefined) process.env[key] = value;
+  }
+  return true;
+}
+
 async function main(): Promise<void> {
+  if (loadDotEnv()) log("loaded .env");
   const args = parseArgs({
     allowPositionals: true,
     options: {
