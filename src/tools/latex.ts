@@ -62,6 +62,32 @@ export async function compileLatex(
   const warnings: string[] = [];
   const base = ["-interaction=nonstopmode", "-halt-on-error=false"];
 
+  if (backend === "tectonic") {
+    // Tectonic runs the whole chain (incl. bibtex) in one invocation and
+    // writes main.log only with --keep-logs; fall back to captured output.
+    const res = await runChild(["tectonic", "--keep-logs", `${main}.tex`], {
+      cwd: dir,
+      timeoutSec: 600,
+      maxOutputChars: 40_000,
+    });
+    const log = readLog(dir, main) || res.stdout + res.stderr;
+    const parsed = parsePdflatexLog(log);
+    const pdfPath = existsSync(join(dir, `${main}.pdf`)) ? join(dir, `${main}.pdf`) : null;
+    if (res.exitCode !== 0 && parsed.errors.length === 0) {
+      parsed.errors.push({
+        kind: "error",
+        message: (res.stderr || res.stdout || "tectonic failed").slice(0, 2_000),
+      });
+    }
+    return {
+      ok: pdfPath !== null && parsed.errors.length === 0,
+      pdfPath,
+      pages: parsed.pages,
+      errors: parsed.errors,
+      warnings: [...warnings, ...parsed.warnings],
+    };
+  }
+
   const pdfrun = async (): Promise<string> => {
     const res = await runChild(wrap(backend, dir, ["pdflatex", ...base, `${main}.tex`]), {
       cwd: backend === "docker" ? undefined : dir,

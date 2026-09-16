@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { parsePdflatexLog } from "../src/tools/latex.ts";
+import { parsePdflatexLog, compileLatex } from "../src/tools/latex.ts";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // Double-quoted lines: LaTeX logs mix backticks and apostrophes freely.
 const LOG = [
@@ -42,5 +45,40 @@ describe("parsePdflatexLog", () => {
     const clean = parsePdflatexLog("Output written on main.pdf (3 pages, 100 bytes).\n");
     expect(clean.errors).toEqual([]);
     expect(clean.pages).toBe(3);
+  });
+});
+
+// Env-gated: runs only where a real tectonic binary is available
+// (PAPERLAB_TEXTEST=1), e.g. dev machines — not CI.
+const tectonicTest = process.env.PAPERLAB_TEXTEST === "1" ? describe : describe.skip;
+
+tectonicTest("compileLatex (tectonic backend)", () => {
+  it("compiles with bibtex and reports undefined citations", { timeout: 300_000 }, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "paperlab-tex-"));
+    try {
+      writeFileSync(
+        join(dir, "main.tex"),
+        [
+          "\\documentclass{article}",
+          "\\begin{document}",
+          "Hello \\cite{doe2021study} and \\cite{missingkey2020}.",
+          "\\bibliographystyle{plain}",
+          "\\bibliography{references}",
+          "\\end{document}",
+        ].join("\n"),
+      );
+      writeFileSync(
+        join(dir, "references.bib"),
+        "@article{doe2021study, title={A Study}, author={Jane Doe}, year={2021}}\n",
+      );
+      const result = await compileLatex(dir, "main", "tectonic", true);
+      expect(result.pdfPath).not.toBeNull();
+      expect(result.pages).toBe(1);
+      // doe2021study resolves via bibtex; missingkey2020 must be flagged.
+      expect(result.errors.some((e) => e.kind === "citation" && e.message.includes("missingkey2020"))).toBe(true);
+      expect(result.errors.some((e) => e.kind === "citation" && e.message.includes("doe2021study"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
