@@ -7,6 +7,8 @@ import { Pipeline, type Phase } from "../orchestrator.ts";
 import { literaturePhase } from "./1-literature.ts";
 import { planPhase } from "./2-plan.ts";
 import { experimentPhase } from "./3-experiment.ts";
+import { interpretPhase } from "./4-interpret.ts";
+import { paperPhase } from "./5-paper.ts";
 
 function notImplemented(key: string, name: string): Phase {
   return {
@@ -36,8 +38,8 @@ export function buildPipeline(): Pipeline {
     literaturePhase,
     planPhase,
     experimentPhase,
-    notImplemented("04-interpret", "Results interpretation"),
-    notImplemented("05-paper", "Paper writing"),
+    interpretPhase,
+    paperPhase,
     notImplemented("06-review", "Peer review and revision"),
   ].map((phase) => ({ ...phase, gate: GATES.has(phase.key) }));
 
