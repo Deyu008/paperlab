@@ -1,0 +1,41 @@
+{
+  "name": "paperlab",
+  "version": "0.1.0",
+  "description": "An open-source paper-research agent harness: literature review \u2192 research plan \u2192 sandboxed experiments \u2192 interpretation \u2192 LaTeX paper \u2192 automated peer review. Built on the pi agent runtime.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "agent",
+    "research",
+    "automation",
+    "llm",
+    "scientific-writing",
+    "pi"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "bin": {
+    "paperlab": "./bin/paperlab.js"
+  },
+  "main": "./src/index.ts",
+  "scripts": {
+    "start": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "paperlab": "tsx src/cli.ts",
+    "smoke:session": "tsx scripts/smoke-session.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Run artifacts (generated research outputs, logs, checkpoints)
+runs/
+
+# Local configuration with real settings / keys never go in git
+config.local.yaml
+.env
+.env.*
+
+# Python sandbox scratch
+__pycache__/
+*.pyc
+
+# LaTeX build byproducts
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log.tmp
+*.out
+*.synctex.gz
+
+# Node
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+Thumbs.db
