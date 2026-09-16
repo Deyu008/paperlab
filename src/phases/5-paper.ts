@@ -51,7 +51,11 @@ export const paperPhase: Phase = {
         "no LaTeX backend available — install texlive/tectonic, or set latex: docker in config",
       );
     }
-    ctx.log(`  🖨 latex backend: ${backend}`);
+    ctx.log(
+      backend === "docker"
+        ? `  🖨 latex backend: docker (image ${process.env.PAPERLAB_TEXIMAGE ?? "texlive/texlive"} — first pull is multi-GB)`
+        : `  🖨 latex backend: ${backend}`,
+    );
 
     // Tools: sandbox rooted at the whole run dir so figure scripts can read
     // experiment data and write figures.

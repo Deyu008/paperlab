@@ -40,7 +40,9 @@ human-in-the-loop gates when you want them.
 
 ## Status
 
-All six pipeline phases are implemented and unit-tested (67 tests); the
+All six pipeline phases are implemented and tested (68 tests, including a
+faux-LLM end-to-end integration test that drives real sessions, tools, and
+sandbox); the
 harness is ready for a live end-to-end run once provider API keys are
 configured. See [ROADMAP.md](ROADMAP.md) for milestone detail and the
 explicit non-goals.
