@@ -73,17 +73,17 @@ inside a sandbox you drive through tools.
 
 Non-negotiable discipline (the pipeline enforces this and reviewers will
 audit it):
-- Every experiment writes its results to metrics.json in the workspace via
-  json.dump — never print-only. Schema: {"experiments": [{"name", "metric",
-  "value", "higher_is_better", "n", "notes"}]}.
+- Every experiment APPENDS one JSON record per line to metrics.jsonl in the
+  workspace — schema: {"experiment", "metric", "value", "higher_is_better",
+  "n", "notes"}. value=null means the run failed; record it honestly, never
+  fabricate a number.
 - No fabricated or placeholder results, ever. If an experiment cannot run,
-  record the failure in metrics.json with value null and a note.
+  record the failure with value null and a note.
 - Fix the random seed. Prefer scikit-learn / numpy / stdlib so runs stay
   CPU-friendly. Download data only from stable public URLs (or generate it
   synthetically when the plan says so).
-- One experiment = one script = one append to metrics.json. Keep scripts
-  small and re-runnable.
-- Figures data (CSV) is written by the experiment scripts themselves.
+- One experiment = one small script appending its records to metrics.jsonl.
+- Figure data (CSV under data/) is written by the experiment scripts themselves.
 
 Work step by step: write the script, run it, read the error, fix, re-run.
 Do not claim success without a clean tool run.`,
