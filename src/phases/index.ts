@@ -1,7 +1,6 @@
 /**
- * Phase registry. Phases are implemented milestone by milestone; the
- * pipeline shape (keys + dependencies + gates) is fixed from the start so
- * the CLI, resume logic, and docs stay stable.
+ * Phase registry: keys, dependencies, and copilot gates are fixed; phase
+ * implementations live in ./N-name.ts files.
  */
 import { Pipeline, type Phase } from "../orchestrator.ts";
 import { literaturePhase } from "./1-literature.ts";
@@ -9,6 +8,7 @@ import { planPhase } from "./2-plan.ts";
 import { experimentPhase } from "./3-experiment.ts";
 import { interpretPhase } from "./4-interpret.ts";
 import { paperPhase } from "./5-paper.ts";
+import { reviewPhase } from "./6-review.ts";
 
 function notImplemented(key: string, name: string): Phase {
   return {
@@ -40,7 +40,7 @@ export function buildPipeline(): Pipeline {
     experimentPhase,
     interpretPhase,
     paperPhase,
-    notImplemented("06-review", "Peer review and revision"),
+    reviewPhase,
   ].map((phase) => ({ ...phase, gate: GATES.has(phase.key) }));
 
   return new Pipeline(phases);
