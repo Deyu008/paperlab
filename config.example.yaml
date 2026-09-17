@@ -40,6 +40,17 @@ budgets:
     accept_threshold: 6.0  # meta-review overall >= this stops revision
 
 # ---------------------------------------------------------------------------
+# Web search / reader (bigmodel Coding-Plan MCP)
+# ---------------------------------------------------------------------------
+# Engineering context for the literature phase (baseline repos, dataset
+# availability, leaderboards) — never a citation source. Requires an API
+# key in the environment (MCP_API_KEY or ZAI_CODING_CN_API_KEY).
+web:
+  enabled: true
+  max_searches: 8
+  max_reads: 6
+
+# ---------------------------------------------------------------------------
 # Human-in-the-loop
 # ---------------------------------------------------------------------------
 # copilot pauses after key phases and asks for approval / notes on stdin.

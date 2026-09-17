@@ -18,6 +18,9 @@
 - [x] Research funnel (redesign): citation snowballing (S2/OpenAlex), tiered arXiv
       full-text reads, provenance-gated saves (number/quote grounding), mechanical
       coverage report from the tool audit log, "Closest prior work" requirement
+- [x] Web context via bigmodel Coding-Plan MCP (web_search_prime / web_reader):
+      zero-dependency streamable-HTTP MCP client, engineering-context-only tool
+      surface, separate budgets and web-sources.jsonl provenance
 
 ## M3 — Research plan ✅
 

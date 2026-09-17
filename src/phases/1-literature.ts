@@ -13,6 +13,9 @@
  */
 import type { Phase, PhaseContext } from "../orchestrator.ts";
 import { createLiteratureTools } from "../tools/literature-tools.ts";
+import { createWebTools } from "../tools/web-tools.ts";
+import { createMcpClient } from "../tools/mcp.ts";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { RateLimiter, type PaperRecord } from "../tools/paper-search.ts";
 import { computeCoverage } from "../tools/coverage.ts";
 import { runRoleSession } from "./support.ts";
@@ -40,6 +43,35 @@ export const literaturePhase: Phase = {
       limiter: new RateLimiter(1_000),
     });
 
+    // Web tools (bigmodel Coding-Plan MCP): engineering context only, and
+    // only when a key is available. Failures degrade to no web tools.
+    const mcpKey = process.env.MCP_API_KEY ?? process.env.ZAI_CODING_CN_API_KEY;
+    let webTools: ToolDefinition[] = [];
+    if (ctx.config.web.enabled && mcpKey) {
+      const initClient = async (endpoint: string, name: string) => {
+        const client = createMcpClient({ endpoint, apiKey: mcpKey, clientName: name });
+        try {
+          await client.initialize();
+          return client;
+        } catch (e) {
+          ctx.log(`  ⚠ ${name} MCP unavailable (${(e as Error).message.slice(0, 120)}) — continuing without it`);
+          return null;
+        }
+      };
+      const [searchClient, readerClient] = await Promise.all([
+        initClient("https://open.bigmodel.cn/api/mcp/web_search_prime/mcp", "paperlab-search"),
+        initClient("https://open.bigmodel.cn/api/mcp/web_reader/mcp", "paperlab-reader"),
+      ]);
+      webTools = createWebTools({
+        store: ctx.store,
+        maxSearches: ctx.config.web.max_searches,
+        maxReads: ctx.config.web.max_reads,
+        search: searchClient,
+        reader: readerClient,
+      });
+      if (webTools.length > 0) ctx.log("  🌐 web search/reader enabled (bigmodel MCP)");
+    }
+
     const prompt = [
       `Research topic: "${ctx.store.topic}"`,
       ``,
@@ -53,6 +85,11 @@ export const literaturePhase: Phase = {
       `6. SURVEY: write related_work.md via save_review — group by theme; per paper state claim/method/limitation; mark which papers you read in full (📗) vs abstract-only (📄); end with a "Closest prior work" section naming exactly the papers our contribution must differentiate from.`,
       ``,
       `Budgets: ${budgets.max_searches} searches · ${budgets.max_snowballs} snowballs · ${budgets.max_full_reads} full reads.`,
+      ...(webTools.length > 0
+        ? [
+            `web_search / read_web_page are for ENGINEERING CONTEXT only (baseline repos, dataset availability, leaderboards). They are not literature and never enter references.bib.`,
+          ]
+        : []),
       `Target: ~${budgets.target_papers} papers total.`,
       ``,
       `Papers already in the library: ${alreadySaved.length}.`,
@@ -61,7 +98,7 @@ export const literaturePhase: Phase = {
         : `The library is empty — start searching.`,
     ].join("\n");
 
-    await runRoleSession({ phase: PHASE_KEY, role: "phd", ctx, tools }, prompt);
+    await runRoleSession({ phase: PHASE_KEY, role: "phd", ctx, tools: [...tools, ...webTools] }, prompt);
 
     // ---- post-conditions ----------------------------------------------------
     const papers = ctx.store.readJsonl<PaperRecord>(PHASE_KEY, "papers.jsonl");

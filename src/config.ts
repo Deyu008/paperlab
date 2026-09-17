@@ -38,6 +38,13 @@ export interface Budgets {
   review: { revision_rounds: number; accept_threshold: number };
 }
 
+export interface WebConfig {
+  /** Enable bigmodel MCP web_search/reader when an API key is present. */
+  enabled: boolean;
+  max_searches: number;
+  max_reads: number;
+}
+
 export type SandboxMode = "docker" | "local" | "auto";
 export type LatexMode = "pdflatex" | "tectonic" | "docker" | "auto";
 
@@ -45,6 +52,7 @@ export interface PaperlabConfig {
   models: { default: ModelRef } & Partial<Record<RoleKey, ModelRef>>;
   budgets: Budgets;
   copilot: boolean;
+  web: WebConfig;
   sandbox: SandboxMode;
   latex: LatexMode;
   run_dir: string;
@@ -62,6 +70,7 @@ export const DEFAULT_CONFIG: PaperlabConfig = {
     review: { revision_rounds: 2, accept_threshold: 6.0 },
   },
   copilot: false,
+  web: { enabled: true, max_searches: 8, max_reads: 6 },
   sandbox: "auto",
   latex: "auto",
   run_dir: "runs",
@@ -190,6 +199,14 @@ export function loadConfig(rawYaml: string): { config: PaperlabConfig; errors: s
       if (r !== undefined) config.budgets.review.revision_rounds = r;
       if (th !== undefined) config.budgets.review.accept_threshold = th;
     }
+  }
+
+  if (isPlainObject(doc.web)) {
+    if (typeof doc.web.enabled === "boolean") config.web.enabled = doc.web.enabled;
+    const ms = optNumber(doc.web.max_searches, "web.max_searches", errors, 0, 100);
+    const mr = optNumber(doc.web.max_reads, "web.max_reads", errors, 0, 100);
+    if (ms !== undefined) config.web.max_searches = ms;
+    if (mr !== undefined) config.web.max_reads = mr;
   }
 
   if (typeof doc.copilot === "boolean") config.copilot = doc.copilot;

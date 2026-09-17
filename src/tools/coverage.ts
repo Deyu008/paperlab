@@ -9,7 +9,14 @@
 import type { RunStore } from "../core/run-store.ts";
 import { paperIdentity, type PaperRecord } from "./paper-search.ts";
 
-export type AuditKind = "search" | "snowball" | "read_attempt" | "read_ok" | "read_failed";
+export type AuditKind =
+  | "search"
+  | "snowball"
+  | "read_attempt"
+  | "read_ok"
+  | "read_failed"
+  | "web_search"
+  | "web_read";
 
 export interface AuditRecord {
   ts: string;
