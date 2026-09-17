@@ -16,7 +16,7 @@
  *   POST /api/steer      {target, text} → steering mailbox
  */
 import { createServer, type Server } from "node:http";
-import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync, openSync, fstatSync, readSync, closeSync } from "node:fs";
 import { join, basename } from "node:path";
 import { SteeringMailbox } from "../core/steering.ts";
 import { PAGE } from "./page.ts";
@@ -106,7 +106,7 @@ export function startWatchServer(runRoot: string, port = 8787): Promise<WatchSer
         }
         send(res, 200, "application/json", { totals, byPhase: [...byPhase.entries()] });
       } else if (req.method === "GET" && url.pathname === "/api/activity") {
-        send(res, 200, "application/json", { activity: recentActivity(runRoot) });
+        send(res, 200, "application/json", recentActivity(runRoot));
       } else if (req.method === "GET" && url.pathname === "/api/artifacts") {
         send(res, 200, "application/json", artifactsSummary(runRoot));
       } else if (req.method === "GET" && url.pathname === "/api/paper") {
@@ -171,48 +171,80 @@ function send(
 interface ActivityEntry {
   ts?: string;
   role: string;
-  kind: "tool" | "text" | "error";
+  kind: "tool" | "text" | "error" | "start";
   detail: string;
 }
 
+export interface ActivityResponse extends Record<string, unknown> {
+  activity: ActivityEntry[];
+  /** Tools currently executing (started, no matching end) with elapsed ms. */
+  inFlight: Array<{ role: string; tool: string; elapsedMs: number }>;
+}
+
+/** Read only the last `bytes` of a file (tail reads must not load GB files). */
+function readTail(path: string, bytes: number): string {
+  const fd = openSync(path, "r");
+  try {
+    const size = fstatSync(fd).size;
+    const start = Math.max(0, size - bytes);
+    const buffer = Buffer.alloc(size - start);
+    readSync(fd, buffer, 0, buffer.length, start);
+    return buffer.toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** Parse the newest transcripts into a recent-activity feed. */
-function recentActivity(runRoot: string): ActivityEntry[] {
+function recentActivity(runRoot: string): ActivityResponse {
   const logsDir = join(runRoot, "logs");
-  if (!existsSync(logsDir)) return [];
+  if (!existsSync(logsDir)) return { activity: [], inFlight: [] };
   const files = readdirSync(logsDir)
     .filter((f) => f.endsWith(".jsonl"))
     .map((f) => ({ f, mtime: statSync(join(logsDir, f)).mtimeMs }))
     .sort((a, b) => b.mtime - a.mtime)
     .slice(0, 3);
   const entries: ActivityEntry[] = [];
-  for (const { f } of files) {
+  const inFlight: ActivityResponse["inFlight"] = [];
+
+  for (const { f, mtime } of files) {
     const role = f.replace(/\.jsonl$/, "");
-    const path = join(logsDir, f);
-    const size = statSync(path).size;
-    const start = Math.max(0, size - 96 * 1024);
-    const tail = readFileSync(path, { encoding: "utf8", flag: "r" }).slice(start > 0 ? start : 0);
+    const tail = readTail(join(logsDir, f), 256 * 1024);
+    const openTools = new Map<string, { tool: string }>();
     for (const line of tail.split("\n")) {
       if (!line.trim()) continue;
       let e: Record<string, unknown>;
       try {
         e = JSON.parse(line) as Record<string, unknown>;
       } catch {
-        continue;
+        continue; // the tail slice may start mid-line
       }
-      if (e.type !== "message_end") continue;
-      const message = e.message as { role?: string; content?: Array<{ type?: string; text?: string; name?: string; arguments?: unknown }> } | undefined;
-      if (!message?.content) continue;
-      for (const block of message.content) {
-        if (block.type === "toolCall") {
-          entries.push({ ts: e.ts as string | undefined, role, kind: "tool", detail: `${block.name}(${summarizeArgs(block.arguments)})` });
-        } else if (block.type === "text" && message.role === "assistant" && block.text) {
-          entries.push({ role, kind: "text", detail: block.text.replace(/\s+/g, " ").slice(0, 160) });
+      if (e.type === "tool_execution_start") {
+        openTools.set(String(e.toolCallId), { tool: String(e.toolName ?? "tool") });
+        entries.push({ role, kind: "start", detail: "\u25b6 " + String(e.toolName ?? "tool") });
+      } else if (e.type === "tool_execution_end") {
+        openTools.delete(String(e.toolCallId));
+      } else if (e.type === "message_end") {
+        const message = e.message as
+          | { role?: string; content?: Array<{ type?: string; text?: string; name?: string; arguments?: unknown }> }
+          | undefined;
+        if (!message?.content) continue;
+        for (const block of message.content) {
+          if (block.type === "toolCall") {
+            entries.push({ role, kind: "tool", detail: `${block.name}(${summarizeArgs(block.arguments)})` });
+          } else if (block.type === "text" && message.role === "assistant" && block.text) {
+            entries.push({ role, kind: "text", detail: block.text.replace(/\s+/g, " ").slice(0, 160) });
+          }
         }
       }
-      if (entries.length > 400) break;
+    }
+    // Unmatched starts in the tail = still executing. The precise start time
+    // may precede the tail window, so elapsed is floored by the file mtime.
+    for (const { tool } of openTools.values()) {
+      inFlight.push({ role, tool, elapsedMs: Date.now() - mtime });
     }
   }
-  return entries.slice(-60).reverse();
+  return { activity: entries.slice(-60).reverse(), inFlight };
 }
 
 function summarizeArgs(args: unknown): string {

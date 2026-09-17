@@ -80,6 +80,10 @@ export const PAGE = `<!doctype html>
   .log .who { font-variant: small-caps; letter-spacing: .08em; color: var(--accent); font-size: 12px; margin-right: 8px; }
   .log .what { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--ink); }
   .log .what.tool { color: #3b5c97; }
+  .log .what.start { color: var(--warn); }
+  .inflight { border: 1px solid var(--warn); background: var(--tint-warn); padding: 8px 12px; margin-bottom: 10px; font-size: 13px; }
+  .inflight .toolname { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--warn); font-weight: 600; }
+  .inflight .elapsed { color: var(--muted); font-style: italic; }
 
   /* intervention */
   .intervene textarea {
@@ -205,10 +209,15 @@ function renderMetrics(ms) {
     (rows || '<tr><td colspan=4 class="empty">no metrics recorded yet</td></tr>') + "</tbody>";
 }
 
-function renderActivity(list) {
-  $("activity").innerHTML = list.slice(0, 40).map(function (a) {
+function renderActivity(resp) {
+  var inflight = (resp.inFlight || []).map(function (t) {
+    return '<div class="inflight">running <span class="toolname">' + esc(t.tool) + "</span> on " +
+      esc(t.role) + ' <span class="elapsed">for ' + Math.max(0, Math.round(t.elapsedMs / 1000)) + "s</span></div>";
+  }).join("");
+  var rows = (resp.activity || []).slice(0, 40).map(function (a) {
     return '<div class="row"><span class="who">' + esc(a.role) + '</span><span class="what ' + a.kind + '">' + esc(a.detail) + "</span></div>";
-  }).join("") || '<span class="empty">waiting for activity…</span>';
+  }).join("");
+  $("activity").innerHTML = inflight + (rows || '<span class="empty">waiting for activity…</span>');
 }
 
 function renderSteering(msgs) {
@@ -242,7 +251,7 @@ function poll() {
     renderPhases(state.phases);
     renderUsage(usage);
     renderMetrics(artifacts.metrics || []);
-    renderActivity(activity.activity || []);
+    renderActivity(activity);
     renderSteering(state.steering || []);
     renderReview(artifacts);
   }).catch(function (e) { $("runstate").textContent = "panel error"; console.error(e); });
