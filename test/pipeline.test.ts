@@ -93,3 +93,37 @@ describe("Pipeline", () => {
 function mkdtemp(): string {
   return mkdtempSync(join(tmpdir(), "paperlab-pipe-"));
 }
+
+import { writeFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
+import { normalizeMispathedArtifacts } from "../src/phases/5-paper.ts";
+
+describe("normalizeMispathedArtifacts (writer path-confusion self-heal)", () => {
+  it("adopts mispathed tex and fig/bootstrap scripts, leaves scaffolding behind", () => {
+    const base = mkdtemp();
+    try {
+      const ctx = makeContext(base);
+      const root = ctx.store.root;
+      mkdirSync(join(root, "tex"), { recursive: true });
+      mkdirSync(join(root, "scripts"), { recursive: true });
+      writeFileSync(join(root, "tex", "main.tex"), "\\documentclass{article}");
+      writeFileSync(join(root, "scripts", "fig_auc.py"), "# fig");
+      writeFileSync(join(root, "scripts", "bootstrap_env.py"), "# pip");
+      writeFileSync(join(root, "scripts", "patch_tex.py"), "# one-shot patch — must NOT be adopted");
+
+      normalizeMispathedArtifacts(ctx);
+
+      expect(existsSync(join(root, "05-paper", "tex", "main.tex"))).toBe(true);
+      expect(existsSync(join(root, "05-paper", "scripts", "fig_auc.py"))).toBe(true);
+      expect(existsSync(join(root, "05-paper", "scripts", "bootstrap_env.py"))).toBe(true);
+      expect(existsSync(join(root, "tex", "main.tex"))).toBe(false);
+      // Scaffolding stays out of the figure-script execution set.
+      expect(existsSync(join(root, "05-paper", "scripts", "patch_tex.py"))).toBe(false);
+
+      // Idempotent: a second pass changes nothing and does not throw.
+      normalizeMispathedArtifacts(ctx);
+      expect(existsSync(join(root, "05-paper", "tex", "main.tex"))).toBe(true);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+});

@@ -178,7 +178,7 @@ export const reviewPhase: Phase = {
       let ok = false;
       try {
         await writer.prompt(
-          `The paper was reviewed below the accept threshold. Revise tex/${MAIN}.tex in place (write_file) — ` +
+          `The paper was reviewed below the accept threshold. Revise ${PHASE_KEY}/tex/${MAIN}.tex in place (write_file; the sandbox root is the run directory) — ` +
             `do not change recorded numbers, only presentation, framing, and honest limitations/clarifications. ` +
             `You may not alter metrics or fabricate new results.\n\n` +
             `Meta-review required revisions:\n${metaReview.required_revisions.map((r) => `- ${r}`).join("\n")}\n\n` +
