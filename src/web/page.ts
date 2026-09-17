@@ -257,11 +257,14 @@ function renderPhases(phases) {
 
 function renderUsage(u) {
   var cost = u.costUsd == null ? "n/a" : "$" + u.costUsd.toFixed(4);
-  $("usage-chip").innerHTML = "tokens <b>" + (u.inputTokens + u.outputTokens).toLocaleString() + "</b> · " + cost + " · " + u.turns + " turns";
+  var totalIn = u.inputTokens + u.cacheReadTokens;
+  var hit = totalIn > 0 ? Math.round((u.cacheReadTokens / totalIn) * 100) + "%" : "—";
+  $("usage-chip").innerHTML = "tokens <b>" + (u.inputTokens + u.outputTokens).toLocaleString() + "</b> · cache <b>" + hit + "</b> · " + cost;
   $("usage").innerHTML =
     '<div class="stat"><span class="k">' + t("turns") + '</span><span class="v">' + u.turns + "</span></div>" +
     '<div class="stat"><span class="k">' + t("inTok") + '</span><span class="v">' + u.inputTokens.toLocaleString() + "</span></div>" +
     '<div class="stat"><span class="k">' + t("outTok") + '</span><span class="v">' + u.outputTokens.toLocaleString() + "</span></div>" +
+    '<div class="stat"><span class="k">cache hit</span><span class="v">' + hit + "</span></div>" +
     '<div class="stat"><span class="k">' + t("cost") + '</span><span class="v">' + cost + "</span></div>";
 }
 

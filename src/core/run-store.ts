@@ -33,6 +33,9 @@ export interface UsageRecord {
   inputTokens: number;
   outputTokens: number;
   costUsd: number | null;
+  /** Provider-reported prefix-cache hit/miss tokens (0 for older runs). */
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
 }
 
 export function slugify(topic: string): string {

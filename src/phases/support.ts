@@ -16,6 +16,18 @@ export interface RunSessionOptions {
   tools?: ToolDefinition[];
   /** Ad-hoc system prompt override (e.g. reviewer personas). */
   systemPrompt?: string;
+  /** Extra cache-affinity disambiguator (e.g. reviewer round or persona). */
+  affinitySuffix?: string;
+}
+
+/**
+ * Stable cache-affinity id: one per (run, phase, role[, suffix]) session
+ * family. Same id across turns of a session keeps the provider replica (and
+ * its implicit prefix cache) pinned; see docs/cache-optimization.md.
+ */
+function affinityIdFor(options: RunSessionOptions): string {
+  const suffix = options.affinitySuffix ? `:${options.affinitySuffix}` : "";
+  return `${options.ctx.store.root}:${options.phase}:${options.role}${suffix}`;
 }
 
 /**
@@ -36,6 +48,7 @@ export async function runRoleSession(
     model,
     customTools: options.tools,
     transcript: ctx.store.transcript(phase, role),
+    cacheAffinityId: affinityIdFor(options),
     onEvent: (event) => {
       const e = event as { type?: string };
       // Full streams and message boundaries live in the transcript; the
@@ -64,6 +77,8 @@ export async function runRoleSession(
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       costUsd: usage.costUsd,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheWriteTokens: usage.cacheWriteTokens,
     });
     session.session.dispose();
   }
@@ -131,6 +146,8 @@ export async function openRoleSession(options: RunSessionOptions): Promise<{
         inputTokens: u.inputTokens,
         outputTokens: u.outputTokens,
         costUsd: u.costUsd,
+        cacheReadTokens: u.cacheReadTokens,
+        cacheWriteTokens: u.cacheWriteTokens,
       });
       session.session.dispose();
     },

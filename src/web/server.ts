@@ -90,20 +90,35 @@ export function startWatchServer(runRoot: string, port = 8787): Promise<WatchSer
           runRoot,
         });
       } else if (req.method === "GET" && url.pathname === "/api/usage") {
-        const usage = readJsonl<{ phase: string; role: string; inputTokens: number; outputTokens: number; costUsd: number | null }>(
-          join(runRoot, "tokens.jsonl"),
-        );
-        const byPhase = new Map<string, { inputTokens: number; outputTokens: number; costUsd: number | null; turns: number }>();
-        let totals = { inputTokens: 0, outputTokens: 0, costUsd: null as number | null, turns: 0 };
+        const usage = readJsonl<{
+          phase: string;
+          role: string;
+          inputTokens: number;
+          outputTokens: number;
+          costUsd: number | null;
+          cacheReadTokens?: number;
+          cacheWriteTokens?: number;
+        }>(join(runRoot, "tokens.jsonl"));
+        interface Bucket {
+          inputTokens: number;
+          outputTokens: number;
+          costUsd: number | null;
+          turns: number;
+          cacheReadTokens: number;
+        }
+        const byPhase = new Map<string, Bucket>();
+        const totals: Bucket = { inputTokens: 0, outputTokens: 0, costUsd: null, turns: 0, cacheReadTokens: 0 };
         for (const u of usage) {
-          const bucket = byPhase.get(u.phase) ?? { inputTokens: 0, outputTokens: 0, costUsd: null as number | null, turns: 0 };
+          const bucket = byPhase.get(u.phase) ?? { inputTokens: 0, outputTokens: 0, costUsd: null, turns: 0, cacheReadTokens: 0 };
           bucket.inputTokens += u.inputTokens;
           bucket.outputTokens += u.outputTokens;
+          bucket.cacheReadTokens += u.cacheReadTokens ?? 0;
           if (typeof u.costUsd === "number") bucket.costUsd = (bucket.costUsd ?? 0) + u.costUsd;
           bucket.turns++;
           byPhase.set(u.phase, bucket);
           totals.inputTokens += u.inputTokens;
           totals.outputTokens += u.outputTokens;
+          totals.cacheReadTokens += u.cacheReadTokens ?? 0;
           if (typeof u.costUsd === "number") totals.costUsd = (totals.costUsd ?? 0) + u.costUsd;
           totals.turns++;
         }
@@ -249,6 +264,10 @@ function recentActivity(runRoot: string): ActivityResponse {
     const role = f.replace(/\.jsonl$/, "");
     const tail = readTail(join(logsDir, f), 256 * 1024);
     const openTools = new Map<string, { tool: string }>();
+    // Events written before _ts stamping lack timestamps — fall back to the
+    // transcript's last-modified time so the timeline always shows something.
+    const tsOf = (e: Record<string, unknown>): string | undefined =>
+      typeof e._ts === "string" ? e._ts : new Date(mtime).toISOString();
     for (const line of tail.split("\n")) {
       if (!line.trim()) continue;
       let e: Record<string, unknown>;
@@ -259,7 +278,7 @@ function recentActivity(runRoot: string): ActivityResponse {
       }
       if (e.type === "tool_execution_start") {
         openTools.set(String(e.toolCallId), { tool: String(e.toolName ?? "tool") });
-        entries.push({ role, kind: "start", detail: "\u25b6 " + String(e.toolName ?? "tool") });
+        entries.push({ ts: tsOf(e), role, kind: "start", detail: "\u25b6 " + String(e.toolName ?? "tool") });
       } else if (e.type === "tool_execution_end") {
         openTools.delete(String(e.toolCallId));
       } else if (e.type === "message_end") {
@@ -269,9 +288,9 @@ function recentActivity(runRoot: string): ActivityResponse {
         if (!message?.content) continue;
         for (const block of message.content) {
           if (block.type === "toolCall") {
-            entries.push({ role, kind: "tool", detail: `${block.name}(${summarizeArgs(block.arguments)})` });
+            entries.push({ ts: tsOf(e), role, kind: "tool", detail: `${block.name}(${summarizeArgs(block.arguments)})` });
           } else if (block.type === "text" && message.role === "assistant" && block.text) {
-            entries.push({ role, kind: "text", detail: block.text.replace(/\s+/g, " ").slice(0, 160) });
+            entries.push({ ts: tsOf(e), role, kind: "text", detail: block.text.replace(/\s+/g, " ").slice(0, 160) });
           }
         }
       }

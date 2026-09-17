@@ -44,6 +44,14 @@ export interface RoleSessionOptions {
   onEvent?: (event: unknown) => void;
   /** Optional JSONL transcript sink (e.g. RunStore#transcript). */
   transcript?: { path: string; write: (record: unknown) => void };
+  /**
+   * Stable cache-affinity id for this session (e.g. "<run>:<phase>:<role>").
+   * Sent as `x-session-affinity`/`x-client-request-id` headers so
+   * multi-replica providers (bigmodel/zai) route all turns of a session to
+   * the same replica — implicit prefix caches are per-replica, and bouncing
+   * replicas was the cause of 0% cache hits in live runs.
+   */
+  cacheAffinityId?: string;
 }
 
 export interface RoleSession extends CreateAgentSessionResult {
@@ -60,6 +68,9 @@ export interface RoleSession extends CreateAgentSessionResult {
 export interface UsageSummary {
   inputTokens: number;
   outputTokens: number;
+  /** Provider-reported cached input tokens (implicit prefix cache hits). */
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   costUsd: number | null;
   model: string;
 }
@@ -71,6 +82,8 @@ interface AssistantLike {
   usage?: {
     input?: number;
     output?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
     totalTokens?: number;
     cost?: { total?: number };
   };
@@ -107,13 +120,22 @@ export async function createRoleSession(options: RoleSessionOptions): Promise<Ro
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(),
     model: options.model,
-    modelRuntime: runtimeOverride ?? undefined,
+    modelRuntime: runtimeOverride
+      ? wrapRuntimeForAffinity(runtimeOverride, options.cacheAffinityId)
+      : undefined,
     customTools: options.customTools,
     ...toolOptions,
   });
 
   const transcript = options.transcript ? guardTranscript(options.transcript) : null;
-  const usage: UsageSummary = { inputTokens: 0, outputTokens: 0, costUsd: null, model: options.model.id };
+  const usage: UsageSummary = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    costUsd: null,
+    model: options.model.id,
+  };
   let sawUsage = false;
 
   result.session.subscribe((event: unknown) => {
@@ -125,6 +147,8 @@ export async function createRoleSession(options: RoleSessionOptions): Promise<Ro
         sawUsage = true;
         usage.inputTokens += u.input ?? 0;
         usage.outputTokens += u.output ?? 0;
+        usage.cacheReadTokens += u.cacheRead ?? 0;
+        usage.cacheWriteTokens += u.cacheWrite ?? 0;
         if (typeof u.cost?.total === "number") {
           usage.costUsd = (usage.costUsd ?? 0) + u.cost.total;
         }
@@ -178,6 +202,33 @@ function extractText(content: unknown): string | null {
  */
 const TRANSCRIPT_SOFT_CAP = 100 * 1024 * 1024;
 const TRANSCRIPT_HARD_CAP = 300 * 1024 * 1024;
+
+/**
+ * Cache-affinity: splice per-session routing headers into every provider
+ * request so multi-replica OpenAI-compatible fleets (bigmodel/zai included)
+ * keep one session on one replica. Implicit prefix caches are per-replica —
+ * a two-turn session that bounces replicas gets 0% hit on turn 2, which is
+ * exactly what live runs showed. Also forwards the id as prompt-cache-key
+ * options for providers that honor them.
+ */
+export function wrapRuntimeForAffinity(runtime: ModelRuntime, affinityId?: string): ModelRuntime {
+  if (!affinityId) return runtime;
+  const spliced = Object.create(Object.getPrototypeOf(runtime)) as ModelRuntime;
+  Object.assign(spliced, runtime);
+  const original = runtime.streamSimple.bind(runtime);
+  spliced.streamSimple = ((model: never, context: never, opts: Record<string, unknown> | undefined) => {
+    const headers = { ...((opts?.headers as Record<string, string>) ?? {}) };
+    headers["x-session-affinity"] = affinityId;
+    headers["x-client-request-id"] = affinityId;
+    return original(model, context, {
+      ...(opts ?? {}),
+      headers,
+      sessionId: affinityId,
+      cacheRetention: "long",
+    }) as never;
+  }) as typeof runtime.streamSimple;
+  return spliced;
+}
 
 function guardTranscript(sink: { path: string; write: (record: unknown) => void }): {
   path: string;
