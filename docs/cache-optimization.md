@@ -174,3 +174,25 @@ Fixes:
 
 The live verification above is still pending — and is now actually testing
 the real code path.
+
+## Live verification (2026-09-17, run `do-k-fold-cross-validation-…`)
+
+Full six-phase run on glm-5.3-flash after the correction. Per-session
+cache-hit rates from `tokens.jsonl`:
+
+| phase/role              | billed input | cacheRead | hit    |
+|-------------------------|-------------:|----------:|-------:|
+| 01-literature/phd       |       76,655 |   672,384 |  89.8% |
+| 03-experiment/mlengineer|      105,106 | 2,799,488 |  96.4% |
+| 05-paper/writer (draft) |      200,652 | 5,687,872 |  96.6% |
+| 05-paper/writer (resume)|      129,484 | 1,293,888 |  90.9% |
+| 06-review (4 sessions)  |      164,894 |    68,928 | ~29%   |
+| short single-turn roles |       ~65k   |         0 |   0%   |
+| **TOTAL**               |    723,740  | 10,534,528 | **93.6%** |
+
+Result: **93.6% overall vs the 57% baseline — target ≥85% met.** The heavy
+multi-turn sessions (experiment, writing) sit at 90–96%, exactly where
+replica-bouncing used to zero out the cache. Low rates on short
+sessions (plan opening turn, one reviewer persona, plan dialogue) are
+structural: a single-prompt session has no prior turns to hit, and each
+reviewer persona receives unique materials. Total run cost: $0.316.
