@@ -10,26 +10,6 @@ import { interpretPhase } from "./4-interpret.ts";
 import { paperPhase } from "./5-paper.ts";
 import { reviewPhase } from "./6-review.ts";
 
-function notImplemented(key: string, name: string): Phase {
-  return {
-    key,
-    name,
-    dependsOn: DEPENDS[key] ?? [],
-    async run() {
-      throw new Error(`${name} is not implemented yet (milestone in progress)`);
-    },
-  };
-}
-
-const DEPENDS: Record<string, readonly string[]> = {
-  "01-literature": [],
-  "02-plan": ["01-literature"],
-  "03-experiment": ["02-plan"],
-  "04-interpret": ["03-experiment"],
-  "05-paper": ["04-interpret"],
-  "06-review": ["05-paper"],
-};
-
 /** Gates (human approval points when copilot mode is on). */
 const GATES: ReadonlySet<string> = new Set(["02-plan", "05-paper"]);
 

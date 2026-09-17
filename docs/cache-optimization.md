@@ -151,3 +151,26 @@ hit rate target: **≥ 85%** (from 57%).
    present and stable across turns.
 3. Live: rerun a full topic; re-run the measurement script; compare hit%
    per session against the baseline table. Target ≥85% overall.
+
+## Post-review correction (2026-09)
+
+A full-codebase review found **O1 was dead code in production**: the
+affinity wrapper was only applied when a runtime override was injected
+(tests/embedding); live runs passed no runtime, so the SDK built its own
+default and `x-session-affinity` was never sent. Additionally,
+`openRoleSession` (plan dialogue, reviewer personas, revision writer) never
+passed `cacheAffinityId` at all.
+
+Fixes:
+
+- `createRoleSession` now builds a **shared default runtime** (offline:
+  `auth.json` + `models.json` + static builtin catalog, once per process)
+  whenever a `cacheAffinityId` is present, and wraps it with the affinity
+  splice. Unusable agent dir degrades to the SDK default with a warning.
+- `openRoleSession` passes the same stable affinity id as `runRoleSession`.
+- Regression: `test/runtime-affinity.test.ts` drives the *production* path
+  (no override) and asserts the headers reach `streamSimple` and the shared
+  runtime is constructed exactly once.
+
+The live verification above is still pending — and is now actually testing
+the real code path.

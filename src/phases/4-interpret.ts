@@ -61,13 +61,10 @@ export const interpretPhase: Phase = {
       `Recorded metrics (the ONLY source of numbers):`,
       renderMetricsTable(aggregated.metrics),
       ``,
-      missingNote ? `Planned experiments that produced no records: ${missingNote}` : ``,
-      ``,
+      ...(missingNote ? [`Planned experiments that produced no records: ${missingNote}`, ``] : []),
       `Structure: What was run → What the numbers show (quote exact values) → Interpretation vs the hypothesis → Limitations (be blunt, reviewers see the logs).`,
       `Do not invent numbers; if something is missing, say so.`,
-    ]
-      .filter((l) => l !== "")
-      .join("\n");
+    ].join("\n");
 
     await runRoleSession({ phase: PHASE_KEY, role: "postdoc", ctx, tools: [save_findings] }, prompt);
 

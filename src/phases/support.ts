@@ -122,6 +122,7 @@ export async function openRoleSession(options: RunSessionOptions): Promise<{
     model,
     customTools: options.tools,
     transcript: ctx.store.transcript(phase, role),
+    cacheAffinityId: affinityIdFor(options),
     onEvent: (event) => {
       const e = event as { type?: string };
       if (e.type === "tool_execution_end") {

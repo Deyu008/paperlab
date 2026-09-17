@@ -18,7 +18,6 @@
 import { createServer, type Server } from "node:http";
 import { readFileSync, existsSync, readdirSync, statSync, openSync, fstatSync, readSync, closeSync } from "node:fs";
 import { join, basename } from "node:path";
-import { statSync as statSyncForCache } from "node:fs";
 import { SteeringMailbox } from "../core/steering.ts";
 import { readModelOverride, writeModelOverride, type ModelScope } from "../core/model-override.ts";
 import { listCatalog } from "../core/models.ts";
@@ -69,7 +68,7 @@ function cachedCatalog(): ReturnType<typeof listCatalog> {
 
 function cachedConfig(): ReturnType<typeof loadConfigFromDisk>["config"] {
   const source = existsSync("config.yaml") ? "config.yaml" : null;
-  const mtimeMs = source ? statSyncForCache(source).mtimeMs : 0;
+  const mtimeMs = source ? statSync(source).mtimeMs : 0;
   if (!configCache || configCache.mtimeMs !== mtimeMs) {
     configCache = { mtimeMs, config: loadConfigFromDisk().config };
   }
@@ -340,7 +339,11 @@ function artifactsSummary(runRoot: string) {
     {},
   );
   const figuresDir = join(runRoot, "05-paper", "figures");
-  const figures = existsSync(figuresDir) ? readdirSync(figuresDir).filter((f) => f.endsWith(".png")) : [];
+  // Match figure-audit's accepted formats (PNG, PDF, JPG, EPS) — the paper
+  // may legitimately ship PDF figures.
+  const figures = existsSync(figuresDir)
+    ? readdirSync(figuresDir).filter((f) => /\.(png|pdf|jpe?g|eps)$/i.test(f))
+    : [];
   const reviews: Array<{ reviewer: string; overall: number; decision: string }> = readJson<
     Array<{ reviewer: string; overall: number; decision: string }>
   >(join(runRoot, "06-review", "round0-reviews.json"), []);

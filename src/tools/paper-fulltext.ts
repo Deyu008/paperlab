@@ -69,8 +69,9 @@ function cleanText(html: string): string {
 }
 
 /**
- * Split arXiv paper HTML into sections on h1-h3 headings. Content before
- * the first heading becomes "Front matter" (title/abstract typically).
+ * Split arXiv paper HTML into sections on h2-h4 headings (h1 is the paper
+ * title in the arXiv/ar5iv convention, not a section boundary). Content
+ * before the first heading becomes "Front matter" (title/abstract typically).
  * <math> blocks collapse to a "[math]" marker — extraction is lossy there.
  */
 export function extractSections(html: string): ParsedPaper {

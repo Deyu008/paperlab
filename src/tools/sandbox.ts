@@ -152,6 +152,10 @@ export function runChild(
       });
     });
 
+    // A child that dies before consuming stdin (spawn failure, instant exit)
+    // raises EPIPE on the write below; without a listener that's an
+    // uncaught exception. The close/error handlers already report the failure.
+    child.stdin.on("error", () => undefined);
     if (options.stdin !== undefined) {
       child.stdin.write(options.stdin);
     }

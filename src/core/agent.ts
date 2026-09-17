@@ -11,11 +11,12 @@ import {
   DefaultResourceLoader,
   SessionManager,
   getAgentDir,
+  ModelRuntime,
   type CreateAgentSessionResult,
   type ToolDefinition,
-  type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
+import { join } from "node:path";
 import { ROLES } from "../roles/index.ts";
 import type { RoleKey } from "../config.ts";
 
@@ -27,6 +28,50 @@ let runtimeOverride: ModelRuntime | null = null;
 
 export function setAgentRuntimeOverride(runtime: ModelRuntime | null): void {
   runtimeOverride = runtime;
+}
+
+/**
+ * Shared default runtime for production sessions (no override). Built once
+ * per agentDir, offline (auth.json + models.json + static builtin catalog).
+ * IMPORTANT: without a runtime here, affinity headers are never injected —
+ * `wrapRuntimeForAffinity` can only splice headers on a runtime we hand to
+ * the SDK ourselves. A review found the affinity optimization was dead code
+ * on the default path for exactly this reason.
+ */
+const sharedRuntimes = new Map<string, Promise<ModelRuntime>>();
+type RuntimeFactory = (agentDir: string) => Promise<ModelRuntime>;
+let defaultRuntimeFactory: RuntimeFactory | null = null;
+
+/** Test seam: inject a factory (also resets the shared cache). Pass null to restore. */
+export function setDefaultRuntimeFactoryForTests(factory: RuntimeFactory | null): void {
+  defaultRuntimeFactory = factory;
+  sharedRuntimes.clear();
+}
+
+async function sharedDefaultRuntime(agentDir: string): Promise<ModelRuntime | null> {
+  let pending = sharedRuntimes.get(agentDir);
+  if (!pending) {
+    const factory: RuntimeFactory =
+      defaultRuntimeFactory ??
+      ((dir) =>
+        ModelRuntime.create({
+          authPath: join(dir, "auth.json"),
+          modelsPath: join(dir, "models.json"),
+          refreshOnCreate: false, // offline: builtins + auth.json suffice; no startup network probe
+        }));
+    pending = factory(agentDir).catch((e: unknown) => {
+      sharedRuntimes.delete(agentDir); // don't cache a failure
+      throw e;
+    });
+    sharedRuntimes.set(agentDir, pending);
+  }
+  try {
+    return await pending;
+  } catch (e) {
+    // Unusable agentDir (corrupt auth.json, ...): fall back to the SDK default.
+    console.warn(`[paperlab] shared model runtime unavailable — using SDK default (${(e as Error).message})`);
+    return null;
+  }
 }
 
 export interface RoleSessionOptions {
@@ -115,14 +160,23 @@ export async function createRoleSession(options: RoleSessionOptions): Promise<Ro
       ? { tools: [...options.builtinTools, ...(options.customTools ?? []).map((t) => t.name)] }
       : { noTools: "builtin" as const };
 
+  // Cache affinity requires a runtime we control (headers are spliced into
+  // provider requests). On the override path it's always available; on the
+  // production path we build the shared default runtime so affinity applies.
+  let modelRuntime: ModelRuntime | undefined;
+  if (runtimeOverride) {
+    modelRuntime = wrapRuntimeForAffinity(runtimeOverride, options.cacheAffinityId);
+  } else if (options.cacheAffinityId) {
+    const shared = await sharedDefaultRuntime(getAgentDir());
+    modelRuntime = shared ? wrapRuntimeForAffinity(shared, options.cacheAffinityId) : undefined;
+  }
+
   const result = await createAgentSession({
     cwd: options.cwd,
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(),
     model: options.model,
-    modelRuntime: runtimeOverride
-      ? wrapRuntimeForAffinity(runtimeOverride, options.cacheAffinityId)
-      : undefined,
+    modelRuntime,
     customTools: options.customTools,
     ...toolOptions,
   });

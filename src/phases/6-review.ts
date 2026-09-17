@@ -17,7 +17,7 @@ import { aggregateMetrics, renderMetricsTable } from "../tools/metrics.ts";
 import type { PaperRecord } from "../tools/paper-search.ts";
 import { compileLatex, probeLatex } from "../tools/latex.ts";
 import { createExperimentTools } from "../tools/experiment-tools.ts";
-import { LocalSandbox } from "../tools/sandbox.ts";
+import { chooseSandbox, createSandbox } from "../tools/sandbox.ts";
 import { reviewerPrompt, REVIEWER_PERSONAS } from "../roles/index.ts";
 import { openRoleSession } from "./support.ts";
 import { writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
@@ -165,7 +165,10 @@ export const reviewPhase: Phase = {
     const revise = async (reviews: ReviewRecord[], metaReview: MetaReview): Promise<boolean> => {
       const backend = await probeLatex(ctx.config.latex);
       if (!backend) throw new Error("no LaTeX backend for revision recompile");
-      const sandbox = new LocalSandbox(ctx.store.root);
+      // Same sandbox policy as phases 3/5: the revision writer executes
+      // agent-authored python, so Docker-first — not a hardcoded local venv.
+      const choice = await chooseSandbox(ctx.config.sandbox);
+      const sandbox = await createSandbox(choice, ctx.store.root);
       const tools = createExperimentTools({
         sandbox,
         maxToolCalls: 12,
@@ -174,7 +177,7 @@ export const reviewPhase: Phase = {
       const writer = await openRoleSession({ phase: PHASE_KEY, role: "writer", ctx, tools });
       let ok = false;
       try {
-        await writer.session.prompt(
+        await writer.prompt(
           `The paper was reviewed below the accept threshold. Revise tex/${MAIN}.tex in place (write_file) — ` +
             `do not change recorded numbers, only presentation, framing, and honest limitations/clarifications. ` +
             `You may not alter metrics or fabricate new results.\n\n` +
@@ -182,15 +185,15 @@ export const reviewPhase: Phase = {
             `Full reviews:\n${JSON.stringify(reviews, null, 2).slice(0, 12_000)}\n\n` +
             `Current tex:\n${currentTex.slice(0, 16_000)}`,
         );
+        const revised = sandbox.readFile(`05-paper/tex/${MAIN}.tex`);
+        if (revised) currentTex = revised;
+        const texDir = join(ctx.store.root, "05-paper", "tex");
+        const result = await compileLatex(texDir, MAIN, backend, true);
+        ok = result.ok;
       } finally {
         writer.close();
+        await sandbox.destroy();
       }
-      const revised = sandbox.readFile(`05-paper/tex/${MAIN}.tex`);
-      if (revised) currentTex = revised;
-      const texDir = join(ctx.store.root, "05-paper", "tex");
-      const result = await compileLatex(texDir, MAIN, backend, true);
-      ok = result.ok;
-      await sandbox.destroy();
       return ok;
     };
 
