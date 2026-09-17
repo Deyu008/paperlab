@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LocalSandbox, runChild } from "../src/tools/sandbox.ts";
+import { LocalSandbox, runChild, resolveHealthyPython } from "../src/tools/sandbox.ts";
 import { createExperimentTools } from "../src/tools/experiment-tools.ts";
 
 let base: string;
@@ -56,8 +56,9 @@ describe("LocalSandbox", () => {
 });
 
 describe("runChild output trimming", () => {
-  it("trims very large outputs with head+tail", async () => {
-    const res = await runChild(["python3", "-c", "print('x' * 100000)"], {
+  it("trims very large outputs with head+tail", { timeout: 30_000 }, async () => {
+    const python = await resolveHealthyPython();
+    const res = await runChild([python, "-c", "print('x' * 100000)"], {
       timeoutSec: 30,
       maxOutputChars: 1_000,
     });

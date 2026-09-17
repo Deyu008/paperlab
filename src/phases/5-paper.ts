@@ -13,6 +13,7 @@ import { aggregateMetrics, renderMetricsTable } from "../tools/metrics.ts";
 import { compileLatex, probeLatex } from "../tools/latex.ts";
 import { auditCitations, extractBibKeys } from "../tools/citation.ts";
 import { auditFigures } from "../tools/figure-audit.ts";
+import { SteeringMailbox } from "../core/steering.ts";
 import { openRoleSession } from "./support.ts";
 import { mkdirSync, existsSync, readdirSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
@@ -65,6 +66,7 @@ export const paperPhase: Phase = {
       sandbox,
       maxToolCalls: Math.max(8, Math.floor(ctx.config.budgets.experiment.max_tool_calls / 3)),
       stepTimeoutSec: ctx.config.budgets.experiment.step_timeout_sec,
+      steeringDrain: () => new SteeringMailbox(ctx.store.root).drain(PHASE_KEY, "writer"),
     });
 
     const dataFiles = (() => {
@@ -98,7 +100,7 @@ export const paperPhase: Phase = {
       `Requirements:`,
       `1. ${MAIN}.tex: \\documentclass{article}, \\graphicspath{{../figures/}}, \\bibliographystyle{plain}, \\bibliography{references}.`,
       `2. Structure: abstract, introduction, related work (cite the provided keys), method, experiments (table + numbers from the metrics above), discussion incl. limitations, conclusion.`,
-      `3. Figure scripts go in scripts/fig_*.py, must be idempotent, read the CSV data files above, and save to 05-paper/figures/*.png (matplotlib, dpi=150). Install matplotlib first if needed via a bootstrap script (pip). Reference figures from the tex as \\includegraphics{...}.`,
+      `3. Figure scripts go in scripts/fig_*.py, must be idempotent, read the CSV data files above, and save figures to 05-paper/figures/ (PNG or PDF; matplotlib, dpi=150). Install matplotlib first if needed via a bootstrap script (pip). Reference figures from the tex as \\includegraphics{...}.`,
       `4. Every number must come from the metrics table verbatim. If a planned experiment is missing, state it as a limitation.`,
       `5. You may read any run artifact with read_file (e.g. 03-experiment/workspace/...) to ground details.`,
     ].join("\n");
@@ -108,12 +110,12 @@ export const paperPhase: Phase = {
     const writer = await openRoleSession({ phase: PHASE_KEY, role: "writer", ctx, tools });
     let compileOk = false;
     try {
-      await writer.session.prompt(opening);
+      await writer.prompt(opening);
       for (let round = 1; round <= maxRounds; round++) {
         ctx.log(`  📝 write/compile round ${round}/${maxRounds}`);
         const tex = sandbox.readFile(`${PHASE_KEY}/tex/${MAIN}.tex`);
         if (!tex) {
-          await writer.session.prompt(
+          await writer.prompt(
             `tex/${MAIN}.tex does not exist yet. Write it now with write_file.`,
           );
           continue;
@@ -153,7 +155,7 @@ export const paperPhase: Phase = {
           break;
         }
         if (round === maxRounds) break;
-        await writer.session.prompt(
+        await writer.prompt(
           `Build round ${round} failed. Fix and finish:\n` +
             problems.map((p) => `- ${p}`).join("\n") +
             (audit.missing.length > 0
@@ -161,7 +163,7 @@ export const paperPhase: Phase = {
               : "") +
             (figAudit.problems.length > 0
               ? `\nFigure requirements: write scripts/fig_*.py that read the real CSVs (${dataFiles}) ` +
-                `and save PNGs to 05-paper/figures/; the pipeline runs them automatically; ` +
+                `and save figures (PNG or PDF) to 05-paper/figures/; the pipeline runs them automatically; ` +
                 `reference with \\includegraphics (no custom wrapper macros).`
               : "") +
             `\nUse write_file to update tex/${MAIN}.tex / scripts, then stop — the pipeline rebuilds.`,

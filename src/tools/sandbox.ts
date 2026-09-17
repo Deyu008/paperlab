@@ -87,18 +87,35 @@ export function runChild(
   const maxOutput = options.maxOutputChars ?? 12_000;
   const started = Date.now();
   return new Promise((resolvePromise) => {
+    // Own process group: on timeout we kill the WHOLE tree. Killing only the
+    // direct child orphaned grandchildren, which on WSL2 spin at 100% CPU
+    // forever (found in live testing).
     const child = spawn(command[0]!, command.slice(1), {
       cwd: options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
     });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
     let settled = false;
 
+    const killGroup = (): void => {
+      try {
+        if (child.pid) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        // group already gone
+      }
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // already dead
+      }
+    };
+
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      killGroup();
     }, options.timeoutSec * 1000);
 
     child.stdout.on("data", (d: Buffer) => {
@@ -111,6 +128,7 @@ export function runChild(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      killGroup();
       resolvePromise({
         exitCode: null,
         stdout: trimOutput(stdout, maxOutput),
@@ -123,6 +141,8 @@ export function runChild(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      // Leader closed — sweep the group for orphaned grandchildren.
+      setTimeout(killGroup, 50);
       resolvePromise({
         exitCode: code,
         stdout: trimOutput(stdout, maxOutput),
@@ -218,6 +238,27 @@ export class DockerSandbox implements Sandbox {
 // Local backend (fallback)
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolve a working python3 interpreter. PATH order can front a broken
+ * interpreter (live incident: a miniconda python hung at 100% CPU even on
+ * `print`), so candidates are probed with a trivial program and the first
+ * healthy one wins. Result is cached.
+ */
+let healthyPythonCache: string | null = null;
+
+export async function resolveHealthyPython(): Promise<string> {
+  if (healthyPythonCache) return healthyPythonCache;
+  const candidates = ["/usr/bin/python3", "/bin/python3", "python3"];
+  for (const candidate of candidates) {
+    const probe = await runChild([candidate, "-c", "print(1)"], { timeoutSec: 8 });
+    if (probe.exitCode === 0 && probe.stdout.trim() === "1") {
+      healthyPythonCache = candidate;
+      return candidate;
+    }
+  }
+  throw new Error("no working python3 found (probed: " + candidates.join(", ") + ")");
+}
+
 export class LocalSandbox implements Sandbox {
   readonly backend = "local" as const;
   readonly venvDir: string;
@@ -232,7 +273,8 @@ export class LocalSandbox implements Sandbox {
   private async python(): Promise<string> {
     const pyBin = join(this.venvDir, "bin", "python");
     if (!this.venvReady || !existsSync(pyBin)) {
-      const res = await runChild(["python3", "-m", "venv", this.venvDir], { timeoutSec: 120 });
+      const base = await resolveHealthyPython();
+      const res = await runChild([base, "-m", "venv", this.venvDir], { timeoutSec: 120 });
       if (res.exitCode !== 0) {
         throw new Error(`failed to create venv: ${res.stderr}`);
       }

@@ -100,7 +100,7 @@ export const reviewPhase: Phase = {
           tools: [submit_review],
         });
         try {
-          await session.session.prompt(
+          await session.prompt(
             `${materials}\n\nReview round ${round + 1}. Persona: ${persona.name}.\n` +
               `You have the paper AND its artifacts. Verify claims against metrics.jsonl (at least 3 explicit checks), ` +
               `then submit via submit_review.`,
@@ -142,7 +142,7 @@ export const reviewPhase: Phase = {
 
       const ac = await openRoleSession({ phase: PHASE_KEY, role: "ac", ctx, tools: [submit_meta] });
       try {
-        await ac.session.prompt(
+        await ac.prompt(
           `Reviews to consolidate:\n\n${JSON.stringify(reviews, null, 2)}\n\n` +
             `Recorded metrics (ground truth):\n${metricsTable}\n\n` +
             `Weigh artifact-grounded critiques above style. Resolve contradictions explicitly, then submit_meta.`,

@@ -17,6 +17,8 @@ export interface ExperimentToolOptions {
   sandbox: Sandbox;
   maxToolCalls: number;
   stepTimeoutSec: number;
+  /** Optional steering drain — human messages injected into the next tool result. */
+  steeringDrain?: () => string | null;
 }
 
 const RECENT_ERRORS = 4;
@@ -131,6 +133,8 @@ export function createExperimentTools(options: ExperimentToolOptions): ToolDefin
         const count = metrics.split("\n").filter((l) => l.trim()).length;
         parts.push(`--- metrics.jsonl now has ${count} records ---`);
       }
+      const steering = options.steeringDrain?.();
+      if (steering) parts.unshift(steering);
       return text(parts.join("\n"));
     },
   });

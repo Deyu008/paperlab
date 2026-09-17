@@ -12,6 +12,7 @@ import { createExperimentTools } from "../tools/experiment-tools.ts";
 import { chooseSandbox, createSandbox } from "../tools/sandbox.ts";
 import { aggregateMetrics, renderMetricsJson, renderMetricsTable } from "../tools/metrics.ts";
 import { isResearchPlan, type ResearchPlan } from "../tools/plan-schema.ts";
+import { SteeringMailbox } from "../core/steering.ts";
 import { runRoleSession } from "./support.ts";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -38,6 +39,7 @@ export const experimentPhase: Phase = {
       sandbox,
       maxToolCalls: budgets.max_tool_calls,
       stepTimeoutSec: budgets.step_timeout_sec,
+      steeringDrain: () => new SteeringMailbox(ctx.store.root).drain(PHASE_KEY, "mlengineer"),
     });
 
     const prompt = [

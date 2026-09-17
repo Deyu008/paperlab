@@ -112,7 +112,7 @@ export async function createRoleSession(options: RoleSessionOptions): Promise<Ro
     ...toolOptions,
   });
 
-  const transcript = options.transcript ?? null;
+  const transcript = options.transcript ? guardTranscript(options.transcript) : null;
   const usage: UsageSummary = { inputTokens: 0, outputTokens: 0, costUsd: null, model: options.model.id };
   let sawUsage = false;
 
@@ -158,17 +158,57 @@ export async function createRoleSession(options: RoleSessionOptions): Promise<Ro
 }
 
 function extractText(content: unknown): string | null {
-  if (typeof content !== "string") {
-    if (Array.isArray(content)) {
-      const parts = content
-        .filter((b): b is { type: string; text: string } => {
-          const block = b as { type?: string } | null;
-          return !!block && block.type === "text";
-        })
-        .map((b) => b.text);
-      return parts.length > 0 ? parts.join("\n") : null;
-    }
-    return null;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const parts = content
+      .filter((b): b is { type: string; text: string } => {
+        const block = b as { type?: string } | null;
+        return !!block && block.type === "text";
+      })
+      .map((b) => b.text);
+    return parts.length > 0 ? parts.join("\n") : null;
   }
-  return content;
+  return null;
+}
+
+/**
+ * Transcript growth guard (live-run lesson: one session wrote 29 GB).
+ * Beyond the soft cap streaming deltas are dropped (message_end still keeps
+ * full texts); beyond the hard cap everything but a truncation marker is.
+ */
+const TRANSCRIPT_SOFT_CAP = 100 * 1024 * 1024;
+const TRANSCRIPT_HARD_CAP = 300 * 1024 * 1024;
+
+function guardTranscript(sink: { path: string; write: (record: unknown) => void }): {
+  path: string;
+  write: (record: unknown) => void;
+} {
+  let written = 0;
+  let announcedHardCap = false;
+  return {
+    path: sink.path,
+    write: (record: unknown) => {
+      const e = record as { type?: string; assistantMessageEvent?: { type?: string } };
+      if (written >= TRANSCRIPT_HARD_CAP) {
+        if (!announcedHardCap) {
+          announcedHardCap = true;
+          sink.write({ type: "transcript_truncated", reason: "hard cap reached", bytes: written });
+        }
+        return;
+      }
+      if (written >= TRANSCRIPT_SOFT_CAP) {
+        // Deltas are the bulk; message_end events carry the full content.
+        if (e.type === "message_update" || e.type === "tool_execution_update") return;
+      }
+      const size = (() => {
+        try {
+          return JSON.stringify(record).length;
+        } catch {
+          return 4_096;
+        }
+      })();
+      written += size;
+      sink.write(record);
+    },
+  };
 }

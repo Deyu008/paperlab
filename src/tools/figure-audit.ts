@@ -36,6 +36,18 @@ function normalizeName(raw: string): string {
   return /\.(png|pdf|jpg|jpeg|eps)$/.test(name) ? name : `${name}.png`;
 }
 
+const IMAGE_EXT = /\.(png|pdf|jpg|jpeg|eps)$/;
+
+/** Case: does `name` (maybe extensionless) resolve to an existing figure file? */
+function resolvesTo(name: string, files: string[]): boolean {
+  if (files.includes(name)) return true;
+  // Extensionless tex reference → any matching image format on disk.
+  if (!IMAGE_EXT.test(name)) {
+    return files.some((f) => f.replace(IMAGE_EXT, "") === name);
+  }
+  return false;
+}
+
 export function auditFigures(tex: string, figuresDir: string, scriptsDir: string): FigureAudit {
   const referenced = new Set<string>();
   const placeholderMacros = new Set<string>();
@@ -51,7 +63,7 @@ export function auditFigures(tex: string, figuresDir: string, scriptsDir: string
   }
 
   const files = existsSync(figuresDir) ? readdirSync(figuresDir) : [];
-  const missing = [...referenced].filter((name) => !files.includes(name));
+  const missing = [...referenced].filter((name) => !resolvesTo(name, files));
 
   let envsWithoutFile = 0;
   for (const env of tex.matchAll(FIGURE_ENV)) {

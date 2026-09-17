@@ -3,6 +3,7 @@
  */
 import type { PhaseContext } from "../orchestrator.ts";
 import { createRoleSession, type RoleSession } from "../core/agent.ts";
+import { SteeringMailbox, withSteering } from "../core/steering.ts";
 import { resolveRoleModel } from "../core/models.ts";
 import type { RoleKey } from "../config.ts";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -35,20 +36,21 @@ export async function runRoleSession(
     customTools: options.tools,
     transcript: ctx.store.transcript(phase, role),
     onEvent: (event) => {
-      const e = event as { type?: string; assistantMessageEvent?: { type?: string } };
-      if (e.type === "message_update" && e.assistantMessageEvent?.type === "text_delta") {
-        return; // keep console output readable: deltas are in the transcript
-      }
-      if (e.type && ["turn_start", "turn_end", "message_start", "message_end"].includes(e.type)) {
-        ctx.log(`  · ${role}: ${e.type}`);
+      const e = event as { type?: string };
+      // Full streams and message boundaries live in the transcript; the
+      // console only notes completed tool work.
+      if (e.type === "tool_execution_end") {
+        const t = event as { toolName?: string };
+        ctx.log(`  · ${role}: ${t.toolName ?? "tool"} done`);
       }
     },
   });
 
   const replies: string[] = [];
+  const mailbox = new SteeringMailbox(ctx.store.root);
   try {
     for (const p of prompts) {
-      await session.prompt(p);
+      await session.prompt(withSteering(mailbox.drain(phase, role), p));
       replies.push(session.lastAssistantText() ?? "");
     }
   } finally {
@@ -90,6 +92,8 @@ export async function readTotalUsage(ctx: PhaseContext): Promise<{ inputTokens: 
  */
 export async function openRoleSession(options: RunSessionOptions): Promise<{
   session: RoleSession;
+  /** Prompt with automatic steering injection (see SteeringMailbox). */
+  prompt: (text: string) => Promise<void>;
   close: () => void;
 }> {
   const { ctx, phase, role } = options;
@@ -101,10 +105,19 @@ export async function openRoleSession(options: RunSessionOptions): Promise<{
     model,
     customTools: options.tools,
     transcript: ctx.store.transcript(phase, role),
+    onEvent: (event) => {
+      const e = event as { type?: string };
+      if (e.type === "tool_execution_end") {
+        const t = event as { toolName?: string };
+        ctx.log(`  · ${role}: ${t.toolName ?? "tool"} done`);
+      }
+    },
   });
+  const mailbox = new SteeringMailbox(ctx.store.root);
   let closed = false;
   return {
     session,
+    prompt: (text: string) => session.prompt(withSteering(mailbox.drain(phase, role), text)),
     close: () => {
       if (closed) return;
       closed = true;

@@ -78,11 +78,11 @@ export const planPhase: Phase = {
     const postdoc = await openRoleSession({ phase: PHASE_KEY, role: "postdoc", ctx, tools: [submit_plan] });
 
     try {
-      await phd.session.prompt(opening);
+      await phd.prompt(opening);
       let lastPhd = phd.session.lastAssistantText() ?? "";
       for (let round = 1; round <= rounds && !result.plan; round++) {
         ctx.log(`  💬 plan dialogue round ${round}/${rounds}`);
-        await postdoc.session.prompt(
+        await postdoc.prompt(
           `PhD student:\n\n${lastPhd}\n\n` +
             (round < rounds
               ? `Challenge and refine this (round ${round}/${rounds}). When the direction is solid enough, submit the final plan with submit_plan.`
@@ -91,7 +91,7 @@ export const planPhase: Phase = {
         const postdocReply = postdoc.session.lastAssistantText();
         if (!postdocReply || result.plan) break;
         if (round < rounds) {
-          await phd.session.prompt(
+          await phd.prompt(
             `Postdoc:\n\n${postdocReply}\n\nRespond: address the critiques, refine the direction, and sharpen the experiment list.`,
           );
           lastPhd = phd.session.lastAssistantText() ?? lastPhd;

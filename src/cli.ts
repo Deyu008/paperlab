@@ -6,6 +6,7 @@
  */
 import { parseArgs } from "node:util";
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { loadConfigFromDisk, type SandboxMode } from "./config.ts";
 import { listCatalog } from "./core/models.ts";
 import { RunStore } from "./core/run-store.ts";
@@ -16,6 +17,7 @@ const USAGE = `paperlab — an open-source paper-research agent harness
 Usage:
   paperlab run --topic "<research topic>" [options]
   paperlab run --resume <run-directory>   [options]
+  paperlab watch [run-directory] [--port <n>]   live panel + human steering
   paperlab models [provider]             list available providers/models
 
 Options:
@@ -72,6 +74,7 @@ async function main(): Promise<void> {
       force: { type: "boolean", default: false },
       sandbox: { type: "string" },
       copilot: { type: "boolean", default: false },
+      port: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -91,6 +94,37 @@ async function main(): Promise<void> {
       console.log(`\n${entry.provider}:`);
       for (const model of entry.models) console.log(`  ${model}`);
     }
+    return;
+  }
+
+  if (command === "watch") {
+    const { startWatchServer } = await import("./web/server.ts");
+    const { readdirSync, statSync } = await import("node:fs");
+    let runPath = args.positionals[1];
+    if (!runPath) {
+      // Default to the newest run under the configured run_dir.
+      const { config } = loadConfigFromDisk(args.values.config);
+      const base = config.run_dir;
+      if (!existsSync(base)) fail(`no runs under ${base} — start one with 'paperlab run --topic ...'`);
+      const candidates = readdirSync(base)
+        .flatMap((slug) => {
+          const slugDir = join(base, slug);
+          try {
+            return readdirSync(slugDir).map((stamp) => join(slugDir, stamp));
+          } catch {
+            return [];
+          }
+        })
+        .filter((p) => existsSync(join(p, "state.json")))
+        .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+      if (candidates.length === 0) fail(`no completed/pending runs under ${base}`);
+      runPath = candidates[0]!;
+    }
+    if (!existsSync(join(runPath, "state.json"))) fail(`not a paperlab run directory: ${runPath}`);
+    const port = args.values.port ? Number(args.values.port) : 8787;
+    const watch = await startWatchServer(runPath, port);
+    log(`watch panel: http://127.0.0.1:${watch.port}  (run: ${runPath})`);
+    log(`steering: use the panel, or append to ${join(runPath, "steering.jsonl")}`);
     return;
   }
 
