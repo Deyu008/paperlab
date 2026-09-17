@@ -165,13 +165,15 @@ async function writeRunReport(store: RunStore): Promise<void> {
   const usagePath = join(store.root, "tokens.jsonl");
   let inputTokens = 0;
   let outputTokens = 0;
+  let costUsd: number | null = null;
   let calls = 0;
   if (existsSync(usagePath)) {
     for (const line of readFileSync(usagePath, "utf8").split("\n")) {
       if (!line.trim()) continue;
-      const rec = JSON.parse(line) as { inputTokens: number; outputTokens: number };
+      const rec = JSON.parse(line) as { inputTokens: number; outputTokens: number; costUsd: number | null };
       inputTokens += rec.inputTokens;
       outputTokens += rec.outputTokens;
+      if (typeof rec.costUsd === "number") costUsd = (costUsd ?? 0) + rec.costUsd;
       calls++;
     }
   }
@@ -193,6 +195,7 @@ async function writeRunReport(store: RunStore): Promise<void> {
       `- LLM turns: ${calls}`,
       `- Input tokens: ${inputTokens.toLocaleString("en-US")}`,
       `- Output tokens: ${outputTokens.toLocaleString("en-US")}`,
+      `- Estimated cost: ${costUsd === null ? "unknown (provider did not report usage)" : `$${costUsd.toFixed(4)}`}`,
       ``,
     ].join("\n"),
   );

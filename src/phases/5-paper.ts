@@ -12,6 +12,7 @@ import { LocalSandbox } from "../tools/sandbox.ts";
 import { aggregateMetrics, renderMetricsTable } from "../tools/metrics.ts";
 import { compileLatex, probeLatex } from "../tools/latex.ts";
 import { auditCitations, extractBibKeys } from "../tools/citation.ts";
+import { auditFigures } from "../tools/figure-audit.ts";
 import { openRoleSession } from "./support.ts";
 import { mkdirSync, existsSync, readdirSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
@@ -134,8 +135,13 @@ export const paperPhase: Phase = {
         // 3) Citation audit (against the pipeline-managed bibliography).
         const audit = auditCitations(tex, references);
 
+        // 4) Figure integrity: referenced PNGs must exist, no placeholder
+        //    macros, figure-producing scripts present (live-run lesson).
+        const figAudit = auditFigures(tex, figuresDir, scriptsDir);
+
         const problems: string[] = [];
         for (const e of result.errors) problems.push(`[${e.kind}] ${e.message}`);
+        problems.push(...figAudit.problems);
         if (audit.missing.length > 0) {
           problems.push(`[citations] keys used but not in the bibliography: ${audit.missing.join(", ")}`);
         }
@@ -143,7 +149,7 @@ export const paperPhase: Phase = {
 
         if (result.ok && problems.length === 0) {
           compileOk = true;
-          ctx.log(`  📄 paper.pdf compiled (${result.pages ?? "?"} pages)`);
+          ctx.log(`  📄 paper.pdf compiled (${result.pages ?? "?"} pages, ${figAudit.referenced.length} figures)`);
           break;
         }
         if (round === maxRounds) break;
@@ -152,6 +158,11 @@ export const paperPhase: Phase = {
             problems.map((p) => `- ${p}`).join("\n") +
             (audit.missing.length > 0
               ? `\nAvailable citation keys: ${bibKeys.join(", ")}`
+              : "") +
+            (figAudit.problems.length > 0
+              ? `\nFigure requirements: write scripts/fig_*.py that read the real CSVs (${dataFiles}) ` +
+                `and save PNGs to 05-paper/figures/; the pipeline runs them automatically; ` +
+                `reference with \\includegraphics (no custom wrapper macros).`
               : "") +
             `\nUse write_file to update tex/${MAIN}.tex / scripts, then stop — the pipeline rebuilds.`,
         );

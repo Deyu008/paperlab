@@ -60,7 +60,7 @@ export async function runRoleSession(
       model: usage.model,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      costUsd: null,
+      costUsd: usage.costUsd,
     });
     session.session.dispose();
   }
@@ -116,7 +116,7 @@ export async function openRoleSession(options: RunSessionOptions): Promise<{
         model: u.model,
         inputTokens: u.inputTokens,
         outputTokens: u.outputTokens,
-        costUsd: null,
+        costUsd: u.costUsd,
       });
       session.session.dispose();
     },

@@ -52,21 +52,28 @@ export interface RoleSession extends CreateAgentSessionResult {
   /** Last assistant text (or null). */
   lastAssistantText(): string | null;
   /** Summed token usage of the session so far. */
-  usage(): { inputTokens: number; outputTokens: number; model: string };
+  usage(): UsageSummary;
   /** Transcript path when a sink was attached, else null. */
   readonly transcriptPath: string | null;
 }
 
-interface UsageSummary {
+export interface UsageSummary {
   inputTokens: number;
   outputTokens: number;
+  costUsd: number | null;
   model: string;
 }
 
+/** pi-ai Usage shape: { input, output, cacheRead, cacheWrite, cost: { total } }. */
 interface AssistantLike {
   role: string;
   model?: string;
-  usage?: { inputTokens?: number; outputTokens?: number };
+  usage?: {
+    input?: number;
+    output?: number;
+    totalTokens?: number;
+    cost?: { total?: number };
+  };
 }
 
 interface TranscriptLike {
@@ -106,14 +113,22 @@ export async function createRoleSession(options: RoleSessionOptions): Promise<Ro
   });
 
   const transcript = options.transcript ?? null;
-  const usage: UsageSummary = { inputTokens: 0, outputTokens: 0, model: options.model.id };
+  const usage: UsageSummary = { inputTokens: 0, outputTokens: 0, costUsd: null, model: options.model.id };
+  let sawUsage = false;
 
   result.session.subscribe((event: unknown) => {
     const e = event as { type?: string; message?: AssistantLike };
     if (transcript) transcript.write(event);
     if (e.type === "message_end" && e.message && e.message.role === "assistant") {
-      usage.inputTokens += e.message.usage?.inputTokens ?? 0;
-      usage.outputTokens += e.message.usage?.outputTokens ?? 0;
+      const u = e.message.usage;
+      if (u) {
+        sawUsage = true;
+        usage.inputTokens += u.input ?? 0;
+        usage.outputTokens += u.output ?? 0;
+        if (typeof u.cost?.total === "number") {
+          usage.costUsd = (usage.costUsd ?? 0) + u.cost.total;
+        }
+      }
     }
     options.onEvent?.(event);
   });
@@ -136,7 +151,7 @@ export async function createRoleSession(options: RoleSessionOptions): Promise<Ro
   const wrapper: RoleSession = Object.assign(result, {
     prompt,
     lastAssistantText,
-    usage: () => ({ ...usage }),
+    usage: () => (sawUsage ? { ...usage } : { ...usage, costUsd: null }),
     transcriptPath: transcript?.path ?? null,
   }) as RoleSession;
   return wrapper;
