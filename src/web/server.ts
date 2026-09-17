@@ -18,6 +18,7 @@
 import { createServer, type Server } from "node:http";
 import { readFileSync, existsSync, readdirSync, statSync, openSync, fstatSync, readSync, closeSync } from "node:fs";
 import { join, basename } from "node:path";
+import { statSync as statSyncForCache } from "node:fs";
 import { SteeringMailbox } from "../core/steering.ts";
 import { readModelOverride, writeModelOverride, type ModelScope } from "../core/model-override.ts";
 import { listCatalog } from "../core/models.ts";
@@ -53,6 +54,26 @@ function readJsonl<T>(path: string): T[] {
       }
     })
     .filter((x): x is T => x !== undefined);
+}
+
+// Static-per-process caches: the builtin catalog never changes at runtime,
+// and config.yaml changes are picked up via mtime. Rebuilding these on every
+// panel poll (2 Hz) was pure waste.
+let catalogCache: ReturnType<typeof listCatalog> | null = null;
+let configCache: { mtimeMs: number; config: ReturnType<typeof loadConfigFromDisk>["config"] } | null = null;
+
+function cachedCatalog(): ReturnType<typeof listCatalog> {
+  if (!catalogCache) catalogCache = listCatalog();
+  return catalogCache;
+}
+
+function cachedConfig(): ReturnType<typeof loadConfigFromDisk>["config"] {
+  const source = existsSync("config.yaml") ? "config.yaml" : null;
+  const mtimeMs = source ? statSyncForCache(source).mtimeMs : 0;
+  if (!configCache || configCache.mtimeMs !== mtimeMs) {
+    configCache = { mtimeMs, config: loadConfigFromDisk().config };
+  }
+  return configCache.config;
 }
 
 const PHASE_ORDER = [
@@ -136,16 +157,15 @@ export function startWatchServer(runRoot: string, port = 8787): Promise<WatchSer
         }
       } else if (req.method === "GET" && url.pathname === "/api/model") {
         const override = readModelOverride(runRoot);
-        const { config } = loadConfigFromDisk();
+        const config = cachedConfig();
         const scopes = ["default", "phd", "postdoc", "mlengineer", "writer", "reviewer", "ac"] as const;
         const effective = Object.fromEntries(
           scopes.map((role) => [
             role,
-            override[role] ??
-              modelRefForRole(config, role === "default" ? "phd" : role),
+            override[role] ?? modelRefForRole(config, role === "default" ? "phd" : role),
           ]),
         );
-        send(res, 200, "application/json", { override, effective, catalog: listCatalog() });
+        send(res, 200, "application/json", { override, effective, catalog: cachedCatalog() });
       } else if (req.method === "POST" && url.pathname === "/api/model") {
         let body = "";
         req.on("data", (chunk: Buffer) => {
@@ -216,7 +236,7 @@ function send(
   body: string | Buffer | Record<string, unknown> | Array<unknown>,
 ): void {
   const payload =
-    typeof body === "string" || Buffer.isBuffer(body) ? body : JSON.stringify(body, null, 2);
+    typeof body === "string" || Buffer.isBuffer(body) ? body : JSON.stringify(body);
   res.writeHead(code, { "content-type": contentType, "cache-control": "no-store" });
   res.end(payload);
 }

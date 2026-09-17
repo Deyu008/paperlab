@@ -329,15 +329,23 @@ function showCurrent() {
   $("m-current").textContent = ref ? t("current") + ": " + ref.provider + " / " + ref.model : "";
 }
 $("m-scope").onchange = showCurrent;
+function loadModel() {
+  fetch("/api/model").then(function (r) { return r.json(); }).then(renderModel).catch(function () {});
+}
 $("m-apply").onclick = function () {
   fetch("/api/model", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ scope: $("m-scope").value, provider: $("m-provider").value, model: $("m-model").value }),
   }).then(function (r) {
-    if (r.ok) { effective[$("m-scope").value] = { provider: $("m-provider").value, model: $("m-model").value }; showCurrent(); }
+    if (r.ok) {
+      effective[$("m-scope").value] = { provider: $("m-provider").value, model: $("m-model").value };
+      showCurrent();
+      loadModel(); // refresh override state from the server
+    }
     return r.json();
   }).then(function (j) { if (j && j.error) alert(j.error); });
 };
+loadModel();
 
 function poll() {
   Promise.all([
@@ -345,9 +353,8 @@ function poll() {
     fetch("/api/usage").then(function (r) { return r.json(); }),
     fetch("/api/activity").then(function (r) { return r.json(); }),
     fetch("/api/artifacts").then(function (r) { return r.json(); }),
-    fetch("/api/model").then(function (r) { return r.json(); }).catch(function () { return null; }),
   ]).then(function (rs) {
-    var state = rs[0], usage = rs[1], activity = rs[2], artifacts = rs[3], modelData = rs[4];
+    var state = rs[0], usage = rs[1], activity = rs[2], artifacts = rs[3];
     lastState = state;
     $("topic").textContent = state.topic;
     $("runroot").textContent = state.runRoot;
@@ -358,7 +365,6 @@ function poll() {
     renderActivity(activity);
     renderSteering(state.steering || []);
     renderReview(artifacts);
-    renderModel(modelData);
   }).catch(function (e) { $("runstate").textContent = "panel error"; console.error(e); });
 }
 

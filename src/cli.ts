@@ -188,6 +188,7 @@ async function main(): Promise<void> {
       throw e;
     }
   } finally {
+    store.flushAll();
     await writeRunReport(store);
   }
 }

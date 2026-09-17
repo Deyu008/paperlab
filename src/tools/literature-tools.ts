@@ -69,6 +69,11 @@ export function createLiteratureTools(options: LiteratureToolOptions): ToolDefin
   let searchesUsed = 0;
   let snowballsUsed = 0;
   const readBudget = new Set<string>(); // unique arxiv ids charged to the full-read budget
+  // Identity cache seeded once, extended on save: avoids re-reading and
+  // re-parsing papers.jsonl on every save_paper call.
+  const identityCache = new Set<string>(
+    store.readJsonl<PaperRecord>(PHASE, "papers.jsonl").map((p) => paperIdentity(p)),
+  );
 
   const audit = (record: Omit<AuditRecord, "ts">): void => {
     store.appendJsonl(PHASE, "usage-audit.jsonl", { ts: new Date().toISOString(), ...record });
@@ -332,7 +337,7 @@ export function createLiteratureTools(options: LiteratureToolOptions): ToolDefin
       }
 
       const identity = paperIdentity(params);
-      if (savedIdentities().has(identity)) {
+      if (identityCache.has(identity)) {
         return text(`Rejected: duplicate of an already-saved paper (${identity}).`);
       }
       const base: Omit<PaperRecord, "bibtex"> = {
@@ -352,9 +357,10 @@ export function createLiteratureTools(options: LiteratureToolOptions): ToolDefin
         quotes: params.quotes ?? [],
       };
       const record: PaperRecord = { ...base, bibtex: buildBibtex(base) };
+      identityCache.add(identity);
       store.appendJsonl(PHASE, "papers.jsonl", record);
       return text(
-        `Saved as ${record.read_status.toUpperCase()} (${savedIdentities().size} total, ` +
+        `Saved as ${record.read_status.toUpperCase()} (${identityCache.size} total, ` +
           `${record.found_via}). BibTeX key: ${record.bibtex.split("{")[1]?.split(",")[0]}`,
       );
     },
@@ -394,10 +400,6 @@ export function createLiteratureTools(options: LiteratureToolOptions): ToolDefin
   });
 
   return [search_papers, snowball, read_paper, save_paper, save_review];
-
-  function savedIdentities(): Set<string> {
-    return new Set(store.readJsonl<PaperRecord>(PHASE, "papers.jsonl").map((p) => paperIdentity(p)));
-  }
 }
 
 // ---- helpers ----------------------------------------------------------------

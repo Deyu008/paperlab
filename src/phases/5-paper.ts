@@ -13,6 +13,13 @@ import { aggregateMetrics, renderMetricsTable } from "../tools/metrics.ts";
 import { compileLatex, probeLatex } from "../tools/latex.ts";
 import { auditCitations, extractBibKeys } from "../tools/citation.ts";
 import { auditFigures } from "../tools/figure-audit.ts";
+import {
+  loadFigureManifest,
+  saveFigureManifest,
+  selectScriptsToRun,
+  hashScript,
+  outputsProducedDuring,
+} from "../tools/figure-manifest.ts";
 import { SteeringMailbox } from "../core/steering.ts";
 import { openRoleSession } from "./support.ts";
 import { mkdirSync, existsSync, readdirSync, copyFileSync } from "node:fs";
@@ -125,15 +132,34 @@ export const paperPhase: Phase = {
           continue;
         }
 
-        // 1) Run figure scripts (idempotent), collect failures.
+        // 1) Run figure scripts — incrementally. Unchanged, previously
+        // successful scripts with their outputs intact are skipped (a full
+        // re-run cost ~10 matplotlib startups per reflection round).
         const scriptErrors: string[] = [];
-        for (const script of sandbox.listFiles(`${PHASE_KEY}/scripts`)) {
-          if (!script.endsWith(".py")) continue;
-          const res = await sandbox.exec(["python3", script], 240);
+        const manifest = loadFigureManifest(paperDir);
+        const scriptEntries = sandbox
+          .listFiles(`${PHASE_KEY}/scripts`)
+          .filter((f) => f.endsWith(".py"))
+          .map((path) => ({ path, content: sandbox.readFile(`${PHASE_KEY}/scripts/${path}`) ?? "" }));
+        const toRun = selectScriptsToRun(scriptEntries, manifest, figuresDir);
+        if (toRun.length < scriptEntries.length) {
+          ctx.log(`  ⏭ ${scriptEntries.length - toRun.length} unchanged figure script(s) skipped`);
+        }
+        for (const path of toRun) {
+          const entry = scriptEntries.find((e) => e.path === path)!;
+          const startMs = Date.now();
+          const res = await sandbox.exec(["python3", path], 240);
+          manifest[path] = {
+            hash: hashScript(entry.content),
+            ok: res.exitCode === 0,
+            outputs: outputsProducedDuring(figuresDir, startMs, Date.now()),
+            ranAt: new Date().toISOString(),
+          };
           if (res.exitCode !== 0) {
-            scriptErrors.push(`${script}: ${(res.stderr || res.stdout).slice(0, 500)}`);
+            scriptErrors.push(`${path}: ${(res.stderr || res.stdout).slice(0, 500)}`);
           }
         }
+        saveFigureManifest(paperDir, manifest);
 
         // 2) Compile.
         const result = await compileLatex(texDir, MAIN, backend, true);

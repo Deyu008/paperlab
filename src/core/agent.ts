@@ -199,9 +199,15 @@ function extractText(content: unknown): string | null {
  * Transcript growth guard (live-run lesson: one session wrote 29 GB).
  * Beyond the soft cap streaming deltas are dropped (message_end still keeps
  * full texts); beyond the hard cap everything but a truncation marker is.
+ *
+ * Size accounting: streaming deltas are the overwhelming majority of events
+ * and are individually tiny — JSON.stringify-ing every one just to count
+ * bytes doubled the CPU/GC cost of transcription. Deltas are estimated;
+ * structural events are measured.
  */
 const TRANSCRIPT_SOFT_CAP = 100 * 1024 * 1024;
 const TRANSCRIPT_HARD_CAP = 300 * 1024 * 1024;
+const DELTA_SIZE_ESTIMATE = 192;
 
 /**
  * Cache-affinity: splice per-session routing headers into every provider
@@ -243,7 +249,7 @@ function guardTranscript(sink: { path: string; write: (record: unknown) => void 
       // (engine events do not carry one).
       const stamped = record as { _ts?: string };
       if (stamped && typeof stamped === "object" && !stamped._ts) stamped._ts = new Date().toISOString();
-      const e = record as { type?: string; assistantMessageEvent?: { type?: string } };
+      const e = record as { type?: string };
       if (written >= TRANSCRIPT_HARD_CAP) {
         if (!announcedHardCap) {
           announcedHardCap = true;
@@ -251,18 +257,20 @@ function guardTranscript(sink: { path: string; write: (record: unknown) => void 
         }
         return;
       }
-      if (written >= TRANSCRIPT_SOFT_CAP) {
+      const isDelta = e.type === "message_update" || e.type === "tool_execution_update";
+      if (written >= TRANSCRIPT_SOFT_CAP && isDelta) {
         // Deltas are the bulk; message_end events carry the full content.
-        if (e.type === "message_update" || e.type === "tool_execution_update") return;
+        return;
       }
-      const size = (() => {
+      if (isDelta) {
+        written += DELTA_SIZE_ESTIMATE;
+      } else {
         try {
-          return JSON.stringify(record).length;
+          written += JSON.stringify(record).length;
         } catch {
-          return 4_096;
+          written += 4_096;
         }
-      })();
-      written += size;
+      }
       sink.write(record);
     },
   };

@@ -38,6 +38,47 @@ export interface UsageRecord {
   cacheWriteTokens?: number;
 }
 
+// ---------------------------------------------------------------------------
+// Buffered append sinks (shared registry so flushAll reaches them all)
+// ---------------------------------------------------------------------------
+
+const FLUSH_BYTES = 32 * 1024;
+const FLUSH_MS = 750;
+const liveSinks = new Set<{ flush: () => void }>();
+
+function flushBufferedSinks(): void {
+  for (const sink of liveSinks) sink.flush();
+}
+
+function acquireBufferedSink(path: string): { write: (chunk: string) => void; flush: () => void } {
+  let buffer = "";
+  const registered = { flush: () => flushIfDirty() };
+
+  function flushIfDirty(): void {
+    if (buffer.length === 0) return;
+    const chunk = buffer;
+    buffer = "";
+    appendFileSync(path, chunk);
+  }
+
+  const timer = setInterval(() => {
+    if (buffer.length > 0) flushIfDirty();
+    else liveSinks.delete(registered); // idle sink: drop from the registry
+  }, FLUSH_MS);
+  timer.unref(); // never keep the process alive for transcript flushing
+
+  const sink = {
+    write: (chunk: string): void => {
+      liveSinks.add(registered); // re-register on activity
+      buffer += chunk;
+      if (buffer.length >= FLUSH_BYTES) flushIfDirty();
+    },
+    flush: flushIfDirty,
+  };
+  liveSinks.add(registered);
+  return sink;
+}
+
 export function slugify(topic: string): string {
   return (
     topic
@@ -140,16 +181,25 @@ export class RunStore {
     return existsSync(p) ? readFileSync(p, "utf8") : null;
   }
 
-  /** Transcript logger for one (phase, role) session. */
+  /** Transcript logger for one (phase, role) session.
+   *
+   * Writes are buffered (32 KB or 750 ms, whichever first) — one syscall
+   * per event was measurable overhead on streaming sessions. A crash loses
+   * at most the unflushed tail; transcripts are observability, not
+   * correctness. flushAll() drains every live sink.
+   */
   transcript(phaseKey: string, role: string): {
     path: string;
     write: (record: unknown) => void;
   } {
     const path = join(this.root, "logs", `${phaseKey}-${role}.jsonl`);
-    return {
-      path,
-      write: (record: unknown) => appendFileSync(path, JSON.stringify(record) + "\n"),
-    };
+    const sink = acquireBufferedSink(path);
+    return { path, write: (record: unknown) => sink.write(JSON.stringify(record) + "\n") };
+  }
+
+  /** Flush all buffered transcript sinks created by this store's process. */
+  flushAll(): void {
+    flushBufferedSinks();
   }
 
   recordUsage(record: UsageRecord): void {

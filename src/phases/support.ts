@@ -68,6 +68,7 @@ export async function runRoleSession(
       replies.push(session.lastAssistantText() ?? "");
     }
   } finally {
+    ctx.store.flushAll();
     const usage = session.usage();
     ctx.store.recordUsage({
       ts: new Date().toISOString(),
