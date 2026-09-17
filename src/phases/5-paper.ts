@@ -8,7 +8,7 @@
  */
 import type { Phase, PhaseContext } from "../orchestrator.ts";
 import { createExperimentTools } from "../tools/experiment-tools.ts";
-import { LocalSandbox } from "../tools/sandbox.ts";
+import { chooseSandbox, createSandbox } from "../tools/sandbox.ts";
 import { aggregateMetrics, renderMetricsTable } from "../tools/metrics.ts";
 import { compileLatex, probeLatex } from "../tools/latex.ts";
 import { auditCitations, extractBibKeys } from "../tools/citation.ts";
@@ -60,8 +60,12 @@ export const paperPhase: Phase = {
     );
 
     // Tools: sandbox rooted at the whole run dir so figure scripts can read
-    // experiment data and write figures.
-    const sandbox = new LocalSandbox(ctx.store.root);
+    // experiment data and write figures. Docker preferred — a local run
+    // executes agent-authored python with full host permissions (a live-run
+    // script once overwrote the host python binary).
+    const choice = await chooseSandbox(ctx.config.sandbox);
+    ctx.log(`  🧪 figure sandbox: ${choice.mode} (${choice.reason})`);
+    const sandbox = await createSandbox(choice, ctx.store.root);
     const tools = createExperimentTools({
       sandbox,
       maxToolCalls: Math.max(8, Math.floor(ctx.config.budgets.experiment.max_tool_calls / 3)),
