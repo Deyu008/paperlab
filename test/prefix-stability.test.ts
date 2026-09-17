@@ -48,7 +48,13 @@ describe("request prefix stability", () => {
     // Same inputs → identical serialized tool schema (order + bytes).
     const build = () => {
       const store = mkStore("prefix-probe");
-      const tools = createLiteratureTools({ store, maxSearches: 15, fetchImpl: noopFetch });
+      const tools = createLiteratureTools({
+        store,
+        maxSearches: 15,
+        maxSnowballs: 6,
+        maxFullReads: 6,
+        fetchImpl: noopFetch,
+      });
       const shaped = tools.map((t) => ({ name: t.name, description: t.description, params: JSON.stringify(t.parameters) }));
       store.writeText("x", "y", "cleanup-marker"); // ensure store usable
       return shaped;

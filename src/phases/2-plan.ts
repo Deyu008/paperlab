@@ -29,7 +29,11 @@ export const planPhase: Phase = {
     const knownTitles = papers.map((p) => p.title);
 
     const digest = papers
-      .map((p, i) => `[${i + 1}] ${p.title} (${p.year ?? "?"}) — ${p.note ?? "(no note)"}`)
+      .map(
+        (p, i) =>
+          `[${i + 1}] ${p.read_status === "full" ? "📗 full-read" : "📄 abstract-only"} ` +
+          `${p.title} (${p.year ?? "?"}) — ${p.note ?? "(no note)"}`,
+      )
       .join("\n");
 
     // Holder object: assignments inside the tool closure stay visible to the phase.

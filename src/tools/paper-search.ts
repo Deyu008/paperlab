@@ -19,6 +19,13 @@ export interface PaperRecord {
   source: "semantic-scholar" | "openalex";
   note: string | null;
   bibtex: string;
+  /** Evidence tier: was the full text read, or only the abstract? */
+  read_status: "abstract" | "full";
+  tldr: string | null;
+  /** Provenance: "search" | "snowball:<ref>/<direction>" | "manual". */
+  found_via: string | null;
+  /** Verbatim quotes the agent claims from the source (validated on save). */
+  quotes: string[];
 }
 
 /** Minimal fetch shape so tests can stub networking. */
@@ -117,10 +124,11 @@ export interface SearchHit {
   arxiv_id: string | null;
   doi: string | null;
   citation_count: number | null;
+  tldr: string | null;
 }
 
 const S2_BASE = "https://api.semanticscholar.org/graph/v1/paper/search";
-const S2_FIELDS = "title,authors,year,venue,abstract,externalIds,citationCount";
+const S2_FIELDS = "title,authors,year,venue,abstract,externalIds,citationCount,tldr";
 
 interface S2Author {
   name?: string;
@@ -147,6 +155,7 @@ export async function searchSemanticScholar(
       abstract?: string;
       externalIds?: { ArXiv?: string; DOI?: string };
       citationCount?: number;
+      tldr?: { text?: string };
     };
     return {
       provider_id: p.paperId ?? "",
@@ -158,6 +167,7 @@ export async function searchSemanticScholar(
       arxiv_id: p.externalIds?.ArXiv ?? null,
       doi: p.externalIds?.DOI ?? null,
       citation_count: p.citationCount ?? null,
+      tldr: p.tldr?.text ?? null,
     };
   });
 }
@@ -189,6 +199,7 @@ export async function searchOpenAlex(
       doi?: string;
       cited_by_count?: number;
       locations?: Array<{ source?: { display_name?: string } }>;
+      abstract_inverted_index?: Record<string, number[]> | null;
     };
     const venue =
       w.primary_location?.source?.display_name ?? w.locations?.[0]?.source?.display_name ?? null;
@@ -198,12 +209,26 @@ export async function searchOpenAlex(
       authors: (w.authorships ?? []).map((a) => a.author?.display_name ?? "").filter(Boolean),
       year: w.publication_year ?? null,
       venue,
-      abstract: null, // OpenAlex abstracts are inverted-index encoded; skip for MVP
+      abstract: decodeOpenAlexAbstract(w.abstract_inverted_index),
       arxiv_id: null,
       doi: w.doi ? w.doi.replace("https://doi.org/", "") : null,
       citation_count: w.cited_by_count ?? null,
+      tldr: null,
     };
   });
+}
+
+/** OpenAlex stores abstracts as word→positions inverted indexes. */
+function decodeOpenAlexAbstract(
+  idx: Record<string, number[]> | undefined | null,
+): string | null {
+  if (!idx) return null;
+  const words: string[] = [];
+  for (const [word, positions] of Object.entries(idx)) {
+    for (const pos of positions) words[pos] = word;
+  }
+  const text = words.filter(Boolean).join(" ").trim();
+  return text.length > 0 ? text : null;
 }
 
 /** Search S2 first; on failure fall back to OpenAlex. */
@@ -218,6 +243,136 @@ export async function searchWithFallback(
   } catch {
     return { hits: await searchOpenAlex(query, limit, fetchImpl), provider: "openalex" };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Citation-graph snowballing (Semantic Scholar; OpenAlex backward fallback)
+// ---------------------------------------------------------------------------
+
+export type SnowballDirection = "backward" | "forward";
+
+/** Validate a paper reference usable in S2 path form: arXiv:<id> | DOI:<doi> | <s2 id>. */
+export function normalizePaperRef(raw: string): string {
+  const ref = raw.trim();
+  const arxivLike = /^[0-9]{4}\.[0-9]{1,5}(v[0-9]+)?$/;
+  if (/^arxiv:/i.test(ref)) return `arXiv:${ref.slice(6)}`;
+  if (arxivLike.test(ref)) return `arXiv:${ref}`;
+  if (/^10\.[0-9]{1,}\//i.test(ref)) return `DOI:${ref}`;
+  if (/^doi:/i.test(ref)) return `DOI:${ref.slice(4)}`;
+  if (/^[a-zA-Z0-9._-]{6,}$/.test(ref)) return ref; // bare S2 corpus/paper id
+  throw new Error(
+    `unresolvable paper_ref "${raw}" — use arXiv:<id>, DOI:<doi>, or a Semantic Scholar paper id`,
+  );
+}
+
+interface S2RelatedResponse {
+  data?: Array<{ citingPaper?: Record<string, unknown>; citedPaper?: Record<string, unknown> }>;
+}
+
+function parseS2Related(json: S2RelatedResponse): SearchHit[] {
+  if (!Array.isArray(json.data)) return [];
+  return json.data
+    .map((entry) => (entry.citingPaper ?? entry.citedPaper) as
+      | {
+          paperId?: string;
+          title?: string;
+          authors?: S2Author[];
+          year?: number;
+          venue?: string;
+          abstract?: string;
+          externalIds?: { ArXiv?: string; DOI?: string };
+          citationCount?: number;
+          tldr?: { text?: string };
+        }
+      | undefined)
+    .filter((x): x is NonNullable<typeof x> => !!x && !!x.title)
+    .map((p) => ({
+      provider_id: p.paperId ?? "",
+      title: p.title ?? "",
+      authors: (p.authors ?? []).map((a) => a.name ?? "").filter(Boolean),
+      year: p.year ?? null,
+      venue: p.venue || null,
+      abstract: p.abstract ?? null,
+      arxiv_id: p.externalIds?.ArXiv ?? null,
+      doi: p.externalIds?.DOI ?? null,
+      citation_count: p.citationCount ?? null,
+      tldr: p.tldr?.text ?? null,
+    }));
+}
+
+/** Newest-and-most-cited first: citation count desc, year desc as tiebreak. */
+export function rankSnowballHits(hits: SearchHit[], limit: number): SearchHit[] {
+  return [...hits]
+    .sort((a, b) => (b.citation_count ?? 0) - (a.citation_count ?? 0) || (b.year ?? 0) - (a.year ?? 0))
+    .slice(0, limit);
+}
+
+export async function snowballSemanticScholar(
+  paperRef: string,
+  direction: SnowballDirection,
+  fetchImpl: FetchLike,
+  apiKey?: string,
+): Promise<SearchHit[]> {
+  const ref = normalizePaperRef(paperRef);
+  const endpoint = direction === "forward" ? "citations" : "references";
+  const url =
+    `https://api.semanticscholar.org/graph/v1/paper/${encodeURIComponent(ref)}/${endpoint}` +
+    `?fields=title,authors,year,venue,abstract,externalIds,citationCount,tldr&limit=100`;
+  const headers: Record<string, string> = { accept: "application/json" };
+  if (apiKey) headers["x-api-key"] = apiKey;
+  const data = (await fetchJson(url, fetchImpl, { headers })) as S2RelatedResponse;
+  return parseS2Related(data);
+}
+
+/** Backward snowball via OpenAlex when S2 is unavailable (requires a DOI). */
+export async function snowballOpenAlexBackward(
+  paperRef: string,
+  fetchImpl: FetchLike,
+  mailto?: string,
+): Promise<SearchHit[]> {
+  const doi = /^10\.[0-9]{1,}\//.test(paperRef.trim())
+    ? paperRef.trim()
+    : /^doi:/i.test(paperRef)
+      ? paperRef.slice(4).trim()
+      : null;
+  if (!doi) throw new Error("OpenAlex backward snowball requires a DOI reference");
+  const work = (await fetchJson(
+    `${OPENALEX_BASE}/https://doi.org/${doi}?select=referenced_works`,
+    fetchImpl,
+  )) as { referenced_works?: string[] };
+  const ids = (work.referenced_works ?? []).map((u) => u.replace("https://openalex.org/", ""));
+  if (ids.length === 0) return [];
+  const params = new URLSearchParams({
+    filter: `openalex:${ids.slice(0, 50).join("|")}`,
+    per_page: "50",
+    select: "id,display_name,authorships,publication_year,cited_by_count,doi,primary_location",
+  });
+  if (mailto) params.set("mailto", mailto);
+  const page = (await fetchJson(`${OPENALEX_BASE}?${params}`, fetchImpl)) as { results?: unknown[] };
+  if (!Array.isArray(page.results)) return [];
+  return page.results.map((raw) => {
+    const w = raw as {
+      id?: string;
+      display_name?: string;
+      authorships?: OpenAlexAuthorship[];
+      publication_year?: number;
+      cited_by_count?: number;
+      doi?: string;
+      primary_location?: { source?: { display_name?: string } };
+    };
+    return {
+      provider_id: (w.id ?? "").replace("https://openalex.org/", ""),
+      title: w.display_name ?? "",
+      authors: (w.authorships ?? []).map((a) => a.author?.display_name ?? "").filter(Boolean),
+      year: w.publication_year ?? null,
+      venue: w.primary_location?.source?.display_name ?? null,
+      abstract: null,
+      arxiv_id: null,
+      doi: w.doi ? w.doi.replace("https://doi.org/", "") : null,
+      citation_count: w.cited_by_count ?? null,
+      tldr: null,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

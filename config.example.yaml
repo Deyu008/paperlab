@@ -25,7 +25,9 @@ models:
 budgets:
   literature:
     target_papers: 12      # papers to collect before writing the review
-    max_searches: 15       # max search-tool invocations
+    max_searches: 15       # keyword discovery budget
+    max_snowballs: 6       # citation-graph expansions (backward/forward)
+    max_full_reads: 6      # distinct papers read at full-text tier
   plan:
     dialogue_rounds: 3     # postdoc<->phd dialogue turns before extraction
   experiment:

@@ -14,6 +14,7 @@ import { Type } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { validateReview, validateMetaReview, type ReviewRecord, type MetaReview } from "../tools/review-schema.ts";
 import { aggregateMetrics, renderMetricsTable } from "../tools/metrics.ts";
+import type { PaperRecord } from "../tools/paper-search.ts";
 import { compileLatex, probeLatex } from "../tools/latex.ts";
 import { createExperimentTools } from "../tools/experiment-tools.ts";
 import { LocalSandbox } from "../tools/sandbox.ts";
@@ -38,9 +39,16 @@ export const reviewPhase: Phase = {
     const findings = ctx.store.readText("04-interpret", "findings.md") ?? "";
     const metricsJsonl = metricsRaw;
 
+    const papers = ctx.store.readJsonl<PaperRecord>("01-literature", "papers.jsonl");
+    const litTiers = papers
+      .map((p) => `- ${p.read_status === "full" ? "📗 full-read" : "📄 abstract-only"}: ${p.title}`)
+      .join("\n");
     const materials = [
       `## Paper (LaTeX source)`,
       tex.slice(0, 24_000),
+      ``,
+      `## Literature evidence tiers (claims resting on abstract-only papers deserve scrutiny)`,
+      litTiers || "(none)",
       ``,
       `## Recorded metrics (ground truth for every number in the paper)`,
       metricsTable,

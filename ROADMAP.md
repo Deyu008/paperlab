@@ -15,6 +15,9 @@
 - [x] `save_paper` tool with schema validation, store-backed dedup, generated BibTeX
 - [x] PhD agent loop → `papers.jsonl` + `related_work.md` + `references.bib`
 - [x] Post-conditions: minimum papers, review present
+- [x] Research funnel (redesign): citation snowballing (S2/OpenAlex), tiered arXiv
+      full-text reads, provenance-gated saves (number/quote grounding), mechanical
+      coverage report from the tool audit log, "Closest prior work" requirement
 
 ## M3 — Research plan ✅
 

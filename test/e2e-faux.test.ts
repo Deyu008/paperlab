@@ -58,6 +58,7 @@ const PAPERS = [
 
 function savePaperCall(i: number) {
   const p = PAPERS[i]!;
+  const isFull = i === 2; // third paper goes through the full-text funnel
   return fauxToolCall("save_paper", {
     title: p.title,
     authors: p.authors.map((a: { name: string }) => a.name),
@@ -67,14 +68,20 @@ function savePaperCall(i: number) {
     arxiv_id: p.externalIds.ArXiv,
     doi: p.externalIds.DOI,
     citation_count: p.citationCount,
-    note: `Claims ${p.abstract} Method is benchmarking. Limitation: only large datasets, not the small-data regime we study.`,
+    tldr: null,
+    read_status: isFull ? "full" : "abstract",
+    found_via: isFull ? "search" : "search",
+    quotes: [],
+    note: isFull
+      ? "Reports 87.3% accuracy for ensembles in the small regime; method is benchmarking; limitation: synthetic focus."
+      : `Claims ${p.abstract} Method is benchmarking. Limitation: only large datasets, not the small-data regime we study.`,
   });
 }
 
 const REVIEW_MD =
   "# Related work\n\n" +
   PAPERS.map((p) => `- **${p.title}** — ${p.abstract} Limitation: not evaluated on small tabular datasets.`).join("\n") +
-  "\n\nThe gap: no study isolates the small-data regime with variance reporting.";
+  "\n\n## Closest prior work\n\nEnsemble Methods Reconsidered is the closest prior work; our study differs by isolating the small-data regime with variance reporting.";
 
 const PLAN = {
   research_question: "Do bagged ensembles beat single gradient boosting on small tabular datasets?",
@@ -119,10 +126,31 @@ const FINDINGS_MD =
 
 beforeAll(() => {
   vi.stubGlobal("fetch", async (url: string | URL) => {
-    if (String(url).includes("semanticscholar")) {
-      return new Response(JSON.stringify({ data: PAPERS }), { status: 200, headers: { "content-type": "application/json" } });
+    const u = String(url);
+    if (u.includes("/citations")) {
+      return new Response(
+        JSON.stringify({
+          data: [
+            { citingPaper: { paperId: "c1", title: "A Citing Competitor", citationCount: 15, year: 2025, externalIds: { ArXiv: "2501.00007" } } },
+          ],
+        }),
+        { status: 200 },
+      );
     }
-    return new Response(JSON.stringify({ results: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    if (u.includes("arxiv.org/html") || u.includes("ar5iv")) {
+      return new Response(
+        "<html><body><h1>Ensemble Methods Reconsidered</h1>" +
+        "<p>Abstract: ensembles help with 87.3% accuracy in the small regime.</p>" +
+        "<h2>Method</h2><p>" +
+        "Experimental detail. ".repeat(200) +
+        "</p></body></html>",
+        { status: 200 },
+      );
+    }
+    if (u.includes("semanticscholar")) {
+      return new Response(JSON.stringify({ data: PAPERS }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ results: [] }), { status: 200 });
   });
 });
 afterAll(() => {
@@ -134,6 +162,8 @@ describe("pipeline e2e (faux LLM, real tools)", () => {
     faux.setResponses([
       // Phase 1 — PhD literature review.
       fauxAssistantMessage([fauxToolCall("search_papers", { query: "gradient boosting tabular", limit: 5 })]),
+      fauxAssistantMessage([fauxToolCall("read_paper", { arxiv_id: "2301.00003" })]),
+      fauxAssistantMessage([fauxToolCall("snowball", { paper_ref: "arXiv:2301.00003", direction: "forward" })]),
       fauxAssistantMessage([savePaperCall(0), savePaperCall(1), savePaperCall(2)]),
       fauxAssistantMessage([fauxToolCall("save_review", { markdown: REVIEW_MD })]),
       fauxAssistantMessage("Literature review complete."),
@@ -170,6 +200,12 @@ describe("pipeline e2e (faux LLM, real tools)", () => {
     const bib = readFileSync(join(store.root, "01-literature", "references.bib"), "utf8");
     expect(bib).toContain("@article{doe2021gradient");
     expect(existsSync(join(store.root, "01-literature", "related_work.md"))).toBe(true);
+    const savedPapers = store.readJsonl<{ read_status: string }>("01-literature", "papers.jsonl");
+    expect(savedPapers.filter((x) => x.read_status === "full")).toHaveLength(1);
+    const audit = store.readJsonl<{ kind: string }>("01-literature", "usage-audit.jsonl");
+    expect(audit.some((a) => a.kind === "read_ok")).toBe(true);
+    expect(audit.some((a) => a.kind === "snowball")).toBe(true);
+    expect(existsSync(join(store.root, "01-literature", "coverage-report.json"))).toBe(true);
 
     // Phase 2 artifacts.
     const plan = JSON.parse(readFileSync(join(store.root, "02-plan", "plan.json"), "utf8"));

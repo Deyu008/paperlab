@@ -31,7 +31,7 @@ export interface ModelRef {
 }
 
 export interface Budgets {
-  literature: { target_papers: number; max_searches: number };
+  literature: { target_papers: number; max_searches: number; max_snowballs: number; max_full_reads: number };
   plan: { dialogue_rounds: number };
   experiment: { max_tool_calls: number; step_timeout_sec: number };
   writeup: { reflections: number };
@@ -55,7 +55,7 @@ export const DEFAULT_CONFIG: PaperlabConfig = {
     default: { provider: "deepseek", model: "deepseek-v4-flash" },
   },
   budgets: {
-    literature: { target_papers: 12, max_searches: 15 },
+    literature: { target_papers: 12, max_searches: 15, max_snowballs: 6, max_full_reads: 6 },
     plan: { dialogue_rounds: 3 },
     experiment: { max_tool_calls: 60, step_timeout_sec: 600 },
     writeup: { reflections: 3 },
@@ -163,8 +163,12 @@ export function loadConfig(rawYaml: string): { config: PaperlabConfig; errors: s
     if (isPlainObject(b.literature)) {
       const t = optNumber(b.literature.target_papers, "budgets.literature.target_papers", errors, 1, 200);
       const m = optNumber(b.literature.max_searches, "budgets.literature.max_searches", errors, 1, 200);
+      const sb = optNumber(b.literature.max_snowballs, "budgets.literature.max_snowballs", errors, 0, 100);
+      const fr = optNumber(b.literature.max_full_reads, "budgets.literature.max_full_reads", errors, 0, 100);
       if (t) config.budgets.literature.target_papers = t;
       if (m) config.budgets.literature.max_searches = m;
+      if (sb !== undefined) config.budgets.literature.max_snowballs = sb;
+      if (fr !== undefined) config.budgets.literature.max_full_reads = fr;
     }
     if (isPlainObject(b.plan)) {
       const r = optNumber(b.plan.dialogue_rounds, "budgets.plan.dialogue_rounds", errors, 1, 10);
