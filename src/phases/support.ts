@@ -4,6 +4,7 @@
 import type { PhaseContext } from "../orchestrator.ts";
 import { createRoleSession, type RoleSession } from "../core/agent.ts";
 import { SteeringMailbox, withSteering } from "../core/steering.ts";
+import { applyModelOverride } from "../core/model-override.ts";
 import { resolveRoleModel } from "../core/models.ts";
 import type { RoleKey } from "../config.ts";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -27,7 +28,7 @@ export async function runRoleSession(
   ...prompts: string[]
 ): Promise<{ session: RoleSession; replies: string[] }> {
   const { ctx, phase, role } = options;
-  const model = resolveRoleModel(ctx.config, role);
+  const model = resolveRoleModel(applyModelOverride(ctx.config, ctx.store.root), role);
   const session = await createRoleSession({
     role: options.systemPrompt ? undefined : role,
     systemPrompt: options.systemPrompt,
@@ -97,7 +98,7 @@ export async function openRoleSession(options: RunSessionOptions): Promise<{
   close: () => void;
 }> {
   const { ctx, phase, role } = options;
-  const model = resolveRoleModel(ctx.config, role);
+  const model = resolveRoleModel(applyModelOverride(ctx.config, ctx.store.root), role);
   const session = await createRoleSession({
     role: options.systemPrompt ? undefined : role,
     systemPrompt: options.systemPrompt,

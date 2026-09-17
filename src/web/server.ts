@@ -19,6 +19,9 @@ import { createServer, type Server } from "node:http";
 import { readFileSync, existsSync, readdirSync, statSync, openSync, fstatSync, readSync, closeSync } from "node:fs";
 import { join, basename } from "node:path";
 import { SteeringMailbox } from "../core/steering.ts";
+import { readModelOverride, writeModelOverride, type ModelScope } from "../core/model-override.ts";
+import { listCatalog } from "../core/models.ts";
+import { modelRefForRole, loadConfigFromDisk } from "../config.ts";
 import { PAGE } from "./page.ts";
 
 interface PhaseStateLike {
@@ -116,6 +119,41 @@ export function startWatchServer(runRoot: string, port = 8787): Promise<WatchSer
         } else {
           send(res, 200, "application/pdf", readFileSync(pdf));
         }
+      } else if (req.method === "GET" && url.pathname === "/api/model") {
+        const override = readModelOverride(runRoot);
+        const { config } = loadConfigFromDisk();
+        const scopes = ["default", "phd", "postdoc", "mlengineer", "writer", "reviewer", "ac"] as const;
+        const effective = Object.fromEntries(
+          scopes.map((role) => [
+            role,
+            override[role] ??
+              modelRefForRole(config, role === "default" ? "phd" : role),
+          ]),
+        );
+        send(res, 200, "application/json", { override, effective, catalog: listCatalog() });
+      } else if (req.method === "POST" && url.pathname === "/api/model") {
+        let body = "";
+        req.on("data", (chunk: Buffer) => {
+          body += chunk.toString("utf8");
+          if (body.length > 10_000) req.destroy();
+        });
+        req.on("end", () => {
+          try {
+            const { scope, provider, model } = JSON.parse(body) as {
+              scope?: ModelScope;
+              provider?: string;
+              model?: string;
+            };
+            if (!scope || !provider || !model) {
+              send(res, 400, "application/json", { error: "scope, provider and model are required" });
+              return;
+            }
+            writeModelOverride(runRoot, scope, { provider, model });
+            send(res, 200, "application/json", { ok: true, override: readModelOverride(runRoot) });
+          } catch (e) {
+            send(res, 400, "application/json", { error: (e as Error).message });
+          }
+        });
       } else if (req.method === "POST" && url.pathname === "/api/steer") {
         let body = "";
         req.on("data", (chunk: Buffer) => {

@@ -188,6 +188,10 @@ function guardTranscript(sink: { path: string; write: (record: unknown) => void 
   return {
     path: sink.path,
     write: (record: unknown) => {
+      // Stamp events with a receive timestamp — the panel timeline needs it
+      // (engine events do not carry one).
+      const stamped = record as { _ts?: string };
+      if (stamped && typeof stamped === "object" && !stamped._ts) stamped._ts = new Date().toISOString();
       const e = record as { type?: string; assistantMessageEvent?: { type?: string } };
       if (written >= TRANSCRIPT_HARD_CAP) {
         if (!announcedHardCap) {
